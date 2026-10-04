@@ -23,8 +23,8 @@ cargo clippy --locked --all-targets --features failpoints -- -D warnings   # pas
 
 | Command | Environment | Result |
 |---|---|---|
-| `cargo test --locked --features failpoints` | macOS | FINAL_MAC |
-| `cargo test --locked --features failpoints` (ext4 volume) | Linux container | FINAL_LINUX |
+| `cargo test --locked --features failpoints` | macOS | 81 unit + 57 integration (objects 14, protocol 13, multipart 9, operations 13, crash 8): **138 passed, 0 failed** |
+| `cargo test --locked --features failpoints` (ext4 volume) | Linux container | 81 unit + 57 integration (objects 14, protocol 13, multipart 9, operations 13, crash 8): **138 passed, 0 failed**; fmt and clippy (`-D warnings`, with failpoints) also pass in the container |
 
 Breakdown by file (both environments): unit tests in `src/` (SigV4 AWS
 vectors, aws-chunked decoder, XML, config, credentials, checksums, IDs/keys,
@@ -70,10 +70,10 @@ self-signed certificate; SDKs then use `STREAMING-UNSIGNED-PAYLOAD-TRAILER`).
 | Rails | Rails/Active Storage 8.1.3.1 (generated app, sqlite3) | 12/12 | 12/12 |
 | Browser | Google Chrome 154.0.8037.93 headless | 9/9 | 9/9 |
 
-Payload modes observed from real clients (server logs): HTTP — `signed`
-(PutObject 62, UploadPart 17), `unsigned` (4); HTTPS —
-`streaming-unsigned-trailer` (PutObject 39, UploadPart 12), `unsigned`
-(PutObject 27, UploadPart 5). The signed chunk modes are not emitted by these
+Payload modes observed from real clients in the final run (server logs):
+HTTP — `signed` (PutObject 62, UploadPart 17), `unsigned` (PutObject 5);
+HTTPS — `streaming-unsigned-trailer` (PutObject 39, UploadPart 12),
+`unsigned` (PutObject 28, UploadPart 5). The signed chunk modes are not emitted by these
 clients' defaults; they are covered by AWS-published vectors and fixtures.
 
 Issues found and fixed through these suites: Ruby `download_file` requires
