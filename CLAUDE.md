@@ -4,7 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-`storlite` is a freshly scaffolded Rust (edition 2024) HTTP server — currently a single file, `src/main.rs`, serving `GET /` → `"Hello, World!"`. No modules, tests, CI, or README exist yet. Update this file as real architecture lands.
+`storlite` is a single-host S3-compatible object store (Rust/Axum, embedded SQLite metadata, two-level sharded files). The code is still a scaffold — `src/main.rs` serves `GET /` → `"Hello, World!"` — and will be replaced as milestones land. Update this file as real architecture lands.
+
+## Specification
+
+The spec bundle lives in `docs/` and is the authoritative contract:
+
+- `docs/SPEC.md` — full contract; invariants **INV-01..INV-14** are mandatory.
+- `docs/IMPLEMENTATION_PLAN.md` — milestones 0–6 and the acceptance matrix (DEP-01, FS-01, …).
+- `docs/AGENTS.md`, `docs/reference-schema.sql`, `docs/examples/*.toml`.
+
+Read the relevant spec sections before each milestone. Conventions for applying the bundle to this repo:
+
+- **Name:** the spec's placeholder `compact-s3` is `storlite` everywhere (binary, CLI, logs, metrics, image).
+- **Layout:** one Cargo package at the repo root (`Cargo.toml`, `src/`, `migrations/`, `tests/`, `deploy/`). No workspace or subdirectory crate.
+- **Paths:** spec references to `SPEC.md`, `IMPLEMENTATION_PLAN.md`, `examples/…` mean `docs/…`. Generated docs (`docs/implementation-status.md`, `docs/compatibility.md`, `docs/operations.md`, `docs/architecture-decisions/`) also go in `docs/`.
+- **Platform:** dev host is macOS; Linux durability tests are authoritative.
 
 ## Commands
 
@@ -17,6 +32,14 @@ cargo fmt                    # format
 cargo test                   # all tests
 cargo test <name>            # tests whose path contains <name>
 cargo test <name> -- --exact --nocapture   # one exact test, show stdout
+```
+
+Required checks once a lockfile is committed (from `docs/AGENTS.md`):
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 ```
 
 ## Architecture
