@@ -13,7 +13,9 @@ Every file is created through one pipeline in `src/store.rs`:
    retry without touching it. Result: `WriteTicket` (+ in-process
    `ActiveGuard`).
 2. `receive` / `copy_into` exclusively create `staging/aa/bb/<id>.tmp`
-   (`O_CREAT|O_EXCL|O_NOFOLLOW`, 0600) and stream bytes in transfer-buffer
+   (`O_CREAT|O_EXCL|O_NOFOLLOW`, 0600; the staging directory is deliberately
+   not synced here — the WRITING row is already durable and a lost staging
+   entry is harmless) and stream bytes in transfer-buffer
    batches on the blocking pool, computing MD5, internal SHA-256, and requested
    S3 checksums in one pass. Result: `ReceivedBlob`.
 3. The caller verifies `Content-MD5`, checksum headers/trailers, payload hash,

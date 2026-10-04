@@ -38,8 +38,10 @@ flush each.
 
 ## Consequences
 
-- Same durability contract with far fewer WAL syncs under concurrency (see
-  `docs/benchmarks.md` for before/after numbers).
+- Same durability contract with far fewer WAL syncs under concurrency.
+  Metadata-only DELETEs reach ~11k/s on Linux/ext4 and ~2k/s on macOS with 16
+  clients; small PUTs are then bounded by their own file/directory syncs
+  (`docs/benchmarks.md`).
 - A body sees earlier bodies' uncommitted changes in the same batch (same
   connection). That is the same serialization order the writer would produce
   anyway; invariants are checked inside each body against that state.

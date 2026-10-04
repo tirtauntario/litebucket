@@ -33,7 +33,10 @@ async fn phase(c: &common::Client, op: &'static str, ops: usize, conc: usize) ->
                 let key = format!("/bench/k{w:03}-{i:06}");
                 let t = Instant::now();
                 let r = match op {
-                    "put" => c.send("PUT", &key, "", &[], Payload::Signed(vec![7u8; 1024])).await,
+                    "put" => {
+                        c.send("PUT", &key, "", &[], Payload::Signed(vec![7u8; 1024]))
+                            .await
+                    }
                     "get" => c.get(&key, "").await,
                     _ => c.delete(&key).await,
                 };
@@ -62,7 +65,7 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let ops: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(4000);
     let conc: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(16);
-    let s = TestServer::start_with("[logging]\nlevel = \"error\"\n").await;
+    let s = TestServer::start().await;
     let c = s.admin();
     c.create_bucket("bench").await;
     let put = phase(&c, "put", ops, conc).await;

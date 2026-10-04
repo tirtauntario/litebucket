@@ -59,7 +59,7 @@ hyper http1 (+ rustls) ──► axum fallback ──► s3::handle
 | Crash safety | SIGABRT at every durable boundary for new objects, overwrites, part replacement, multipart completion, delete, and GC, followed by recovery and offline `check --full` |
 | Fault injection | fsync EIO, directory-sync EIO, write ENOSPC, uncertain commit, forced tracked/untracked storage-ID collisions |
 | Real clients | AWS CLI 2.37.9, Boto3 1.43.108, aws-sdk-s3 (Ruby) 1.229.0, Rails 8.1.3.1, Chrome 154: all pass over HTTP and HTTPS |
-| Resources | Peak server RSS < 8 MiB while streaming a 1 GiB object; ≈ 13 MiB with 8 concurrent 64 MiB transfers (`docs/benchmarks.md`) |
+| Resources | Peak server RSS < 8 MiB while streaming a 1 GiB object; ≈ 13 MiB with 8 concurrent 64 MiB transfers; small 1 KiB PUT 1406/s on Linux/ext4 (16 clients) (`docs/benchmarks.md`) |
 | Container | Non-root, read-only root fs, `cap_drop: ALL`; TLS round trip, healthcheck, drained shutdown, clean `check --full` |
 
 Defects found by the evidence work and fixed: Ruby `download_file` needed
@@ -69,7 +69,7 @@ completion validated part sizes before part existence; any storage `EIO` (not
 only file fsync) now halts mutations; crash failpoints needed per-transition
 names (the generic one had fired on the registration commit); small-write
 throughput was bounded by one WAL flush per transaction (fixed by group
-commit).
+commit) and by an unnecessary staging-directory sync (removed).
 
 ## 4. Assumptions and decisions
 
@@ -174,9 +174,11 @@ Each is recorded where it applies; this list is the single overview.
 
 ### Storage, recovery, and maintenance
 
-36. The staging-shard entry is synced at file creation (so recovery can always
-    find staging files); shard directory chains are synced on first use per
-    process.
+36. The staging-shard entry is **not** synced at file creation (the WRITING
+    row is already durable and recovery tolerates a missing staging file);
+    durability is established at publication (file fsync, destination and
+    source directory syncs). Shard directory chains are synced on first use
+    per process.
 37. Integrity faults (missing/short files) mark readiness unhealthy but do not
     halt writes; storage `EIO` does halt writes.
 38. GC's grace period (60 s) applies online; offline `gc --apply` ignores it.
@@ -205,8 +207,8 @@ Each is recorded where it applies; this list is the single overview.
 
 - Not tested: power loss, x86-64, XFS. Durability assumes the device
   honors `fsync`/`F_FULLFSYNC`.
-- macOS small-write throughput is dominated by `F_FULLFSYNC`; see
-  `docs/benchmarks.md` for macOS vs Linux figures.
+- macOS small-write throughput (~140 PUT/s) is dominated by `F_FULLFSYNC`
+  drive-cache flushes; Linux/ext4 reaches ~1400 PUT/s on the same hardware.
 - Not implemented (by spec or deferred): UploadPartCopy, ListObjects v1,
   virtual-hosted addressing, versioning, SSE, Object Lock, tagging, online
   backup, HTTP/2, per-credential rate limits, unknown-length uploads.

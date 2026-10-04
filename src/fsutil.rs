@@ -320,9 +320,9 @@ impl DataDir {
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::from_raw_mode(0o600),
         )?;
-        // The new entry in the staging shard must survive a crash so recovery
-        // can find and reclaim it.
-        sync_dir(&dir)?;
+        // No directory sync here: the WRITING row is already durable, and if
+        // this entry is lost in a crash, recovery reclaims a row whose file is
+        // simply absent. Durability is established at publication.
         Ok(File::from(fd))
     }
 
