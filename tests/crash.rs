@@ -506,10 +506,21 @@ async fn fs_04_injected_io_failures_never_acknowledge() {
         ("commit:object=eio", 500),
     ] {
         let (child, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp)]);
-        let r = c.put("/docs/k", &new_body()).await;
-        assert_eq!(r.status, want_status, "{fp}: {}", r.text());
+        let r = node.client().put("/docs/k", &new_body()).await;
+        // `sync_dir` (new staging shard after a restart) and `write` fail
+        // before the body is fully read, so the server answers and closes
+        // while the client may still be sending; the client can then see a
+        // reset instead of the response. Both outcomes are no acknowledgment.
+        let early = fp.starts_with("sync_dir") || fp.starts_with("write");
+        assert!(
+            r.status == want_status || (early && r.status == 0),
+            "{fp}: {} {}",
+            r.status,
+            r.text()
+        );
+        // Fresh connections: the one above may have been closed mid-request.
         assert_eq!(
-            assert_whole(&c.get("/docs/k", "").await.body, fp),
+            assert_whole(&node.client().get("/docs/k", "").await.body, fp),
             'o',
             "{fp}: old object replaced"
         );
@@ -517,7 +528,7 @@ async fn fs_04_injected_io_failures_never_acknowledge() {
             let rz = readyz(node.mport).unwrap();
             assert!(rz.contains("\"mutations_halted\":true"), "{fp}: {rz}");
             assert_eq!(
-                c.put("/docs/other", b"x").await.status,
+                node.client().put("/docs/other", b"x").await.status,
                 503,
                 "{fp}: writes refused while halted"
             );
@@ -525,7 +536,7 @@ async fn fs_04_injected_io_failures_never_acknowledge() {
         stop(child);
     }
     let (child, _) = node.spawn(&[]);
-    assert_eq!(c.put("/docs/k", &new_body()).await.status, 200);
+    assert_eq!(node.client().put("/docs/k", &new_body()).await.status, 200);
     stop(child);
     verify_offline(&node, "io failures");
 }
