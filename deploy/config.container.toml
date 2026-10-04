@@ -1,0 +1,21 @@
+# Container configuration. Secrets (credentials, TLS key) are mounted
+# read-only; only /data is writable. Paths are absolute.
+data_dir = "/data"
+region = "us-east-1"
+credentials_file = "/run/secrets/storlite-credentials.toml"
+# Docker secrets are mounted 0444 by default; allow group read only if your
+# orchestrator mounts them 0440 with a dedicated group. World-readable files
+# are always refused, so set the secret's mode to 0400 (see compose.yaml).
+
+[http]
+listen = "0.0.0.0:9000"
+tls_certificate_file = "/run/secrets/storlite-tls.crt"
+tls_private_key_file = "/run/secrets/storlite-tls.key"
+
+[management]
+# Keep the management listener private: bound inside the container only.
+listen = "127.0.0.1:9001"
+
+[logging]
+format = "json"
+level = "info"

@@ -15,8 +15,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::Result;
 use crate::fsutil::{Area, sync_dir};
+use crate::metadata::now_ms;
 use crate::metadata::queries;
-use crate::metadata::{now_ms, with_write_tx};
 use crate::store::{Store, blocking};
 
 pub struct Maintenance {
@@ -170,16 +170,14 @@ pub async fn gc_once(store: &Arc<Store>) -> Result<usize> {
     let rows = removed.clone();
     let deleted = store
         .db
-        .write(move |c| {
-            with_write_tx(c, |tx| {
-                let mut n = 0;
-                for id in &rows {
-                    if queries::delete_garbage_row(tx, id)? {
-                        n += 1;
-                    }
+        .write_tx("", move |tx| {
+            let mut n = 0;
+            for id in &rows {
+                if queries::delete_garbage_row(tx, id)? {
+                    n += 1;
                 }
-                Ok(n)
-            })
+            }
+            Ok(n)
         })
         .await?;
     let bytes: u64 = batch
@@ -222,8 +220,7 @@ pub async fn expire_once(store: &Arc<Store>) -> Result<usize> {
         let idc = id.clone();
         let released = store
             .db
-            .write(move |c| {
-                with_write_tx(c, |tx| {
+            .write_tx("", move |tx| {
                     // Recheck inactivity under the guard.
                     let still: Option<i64> = tx
                         .query_row(
@@ -237,7 +234,6 @@ pub async fn expire_once(store: &Arc<Store>) -> Result<usize> {
                     }
                     queries::abort_upload(tx, &idc, now, now + ttl, after)
                 })
-            })
             .await?;
         if let Some(bytes) = released {
             store.capacity.release_part_bytes(bytes);
@@ -255,7 +251,9 @@ pub async fn expire_once(store: &Arc<Store>) -> Result<usize> {
     let now = now_ms();
     store
         .db
-        .write(move |c| with_write_tx(c, |tx| queries::delete_expired_receipts(tx, now, 1000)))
+        .write_tx("", move |tx| {
+            queries::delete_expired_receipts(tx, now, 1000)
+        })
         .await?;
     Ok(expired)
 }

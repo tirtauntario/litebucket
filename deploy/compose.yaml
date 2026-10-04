@@ -1,0 +1,41 @@
+# Single-process deployment: no database or worker containers.
+#   docker compose -f deploy/compose.yaml run --rm storlite init --config /etc/storlite/config.toml
+#   docker compose -f deploy/compose.yaml up -d
+services:
+  storlite:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: storlite:local
+    ports:
+      - "9000:9000"
+    volumes:
+      - storlite-data:/data
+      - ./config.container.toml:/etc/storlite/config.toml:ro
+    secrets:
+      - source: storlite-credentials
+        mode: 0400
+      - source: storlite-tls.crt
+        mode: 0444
+      - source: storlite-tls.key
+        mode: 0400
+    # Stop the old process before starting a new one: never two writers.
+    stop_grace_period: 40s
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    ulimits:
+      nofile: { soft: 8192, hard: 8192 }
+
+secrets:
+  storlite-credentials:
+    file: ./secrets/credentials.toml
+  storlite-tls.crt:
+    file: ./secrets/tls.crt
+  storlite-tls.key:
+    file: ./secrets/tls.key
+
+volumes:
+  storlite-data:

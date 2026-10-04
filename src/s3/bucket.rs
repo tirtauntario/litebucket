@@ -10,8 +10,8 @@ use super::listing::{self, TokenScope};
 use super::xml::XmlWriter;
 use super::{Cx, read_control_body};
 use crate::credentials::BucketScope;
+use crate::metadata::now_ms;
 use crate::metadata::queries::{self, CreateBucket, DeleteBucket};
-use crate::metadata::{now_ms, with_write_tx};
 
 pub async fn list_buckets(cx: &Cx) -> S3Result<Response<Body>> {
     let scope = match cx.auth.credential.bucket_listing_scope() {
@@ -160,7 +160,7 @@ pub async fn create_bucket(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     let res = cx
         .store
         .db
-        .write(move |c| with_write_tx(c, |tx| queries::create_bucket(tx, &n, now, max)))
+        .write_tx("", move |tx| queries::create_bucket(tx, &n, now, max))
         .await?;
     match res {
         CreateBucket::Created(_) => Ok(response(
@@ -224,7 +224,7 @@ pub async fn delete_bucket(cx: &Cx) -> S3Result<Response<Body>> {
     let res = cx
         .store
         .db
-        .write(move |c| with_write_tx(c, |tx| queries::delete_bucket(tx, &id)))
+        .write_tx("", move |tx| queries::delete_bucket(tx, &id))
         .await?;
     match res {
         DeleteBucket::Deleted => Ok(response(

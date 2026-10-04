@@ -31,11 +31,11 @@ use crate::credentials::Action;
 use crate::error::Error;
 use crate::fsutil::Area;
 use crate::ids::UploadId;
+use crate::metadata::now_ms;
 use crate::metadata::queries::{
     self, BeginCompletion, BlobArea, CreateUpload, NewObject, ObjectCommit, PartCommit, PartRow,
     UploadRow, UploadState, WriteConditions,
 };
-use crate::metadata::{now_ms, with_named_write_tx, with_write_tx};
 use crate::store::{CopySource, Reconciled, Store};
 
 fn upload_id(cx: &Cx) -> S3Result<UploadId> {
@@ -122,7 +122,7 @@ pub async fn create(cx: &Cx) -> S3Result<Response<Body>> {
     let res = cx
         .store
         .db
-        .write(move |c| with_write_tx(c, |tx| queries::create_upload(tx, &row, max)))
+        .write_tx("", move |tx| queries::create_upload(tx, &row, max))
         .await?;
     match res {
         CreateUpload::Created => {}
@@ -239,12 +239,8 @@ pub async fn upload_part(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
             let (now, after) = (now_ms(), store.garbage_after());
             let res = store
                 .db
-                .write(move |c| {
-                    with_named_write_tx(c, "part", |tx| {
-                        queries::commit_part(
-                            tx, &uid, &bid, &key, number, &blob, &etag2, now, after,
-                        )
-                    })
+                .write_tx("part", move |tx| {
+                    queries::commit_part(tx, &uid, &bid, &key, number, &blob, &etag2, now, after)
                 })
                 .await;
             let replaced = match res {
@@ -607,10 +603,8 @@ impl CompletionJob {
         let (idc, now) = (self.upload.upload_id.clone(), now_ms());
         let begin = store
             .db
-            .write(move |c| {
-                with_named_write_tx(c, "begin_completion", |tx| {
-                    queries::begin_completion(tx, &idc, &fp, &manifest_json, &output, now)
-                })
+            .write_tx("begin_completion", move |tx| {
+                queries::begin_completion(tx, &idc, &fp, &manifest_json, &output, now)
             })
             .await?;
         if begin != BeginCompletion::Started {
@@ -625,8 +619,8 @@ impl CompletionJob {
             let after = store.garbage_after();
             let _ = store
                 .db
-                .write(move |c| {
-                    with_write_tx(c, |tx| queries::revert_completion(tx, &uid, &output, after))
+                .write_tx("", move |tx| {
+                    queries::revert_completion(tx, &uid, &output, after)
                 })
                 .await;
         }
@@ -713,10 +707,8 @@ impl CompletionJob {
         crate::failpoint::hit("before_completion_commit");
         let res = store
             .db
-            .write(move |c| {
-                with_named_write_tx(c, "completion", |tx| {
-                    queries::finish_completion(tx, &uid, &new, &cond, &result_json, expires, after)
-                })
+            .write_tx("completion", move |tx| {
+                queries::finish_completion(tx, &uid, &new, &cond, &result_json, expires, after)
             })
             .await;
         match res {
@@ -761,10 +753,8 @@ pub async fn abort(cx: &Cx) -> S3Result<Response<Body>> {
     let ttl = store.config.multipart.receipt_retention_seconds as i64 * 1000;
     let released = store
         .db
-        .write(move |c| {
-            with_write_tx(c, |tx| {
-                queries::abort_upload(tx, &idc, now, now + ttl, after)
-            })
+        .write_tx("", move |tx| {
+            queries::abort_upload(tx, &idc, now, now + ttl, after)
         })
         .await?
         .ok_or_else(S3Error::no_such_upload)?;

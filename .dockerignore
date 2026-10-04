@@ -1,0 +1,7 @@
+target
+.interop
+.git
+docs
+tests
+scripts
+deploy/secrets

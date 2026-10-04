@@ -26,7 +26,7 @@ use crate::fsutil::{Area, DataDir};
 use crate::ids::{BucketId, StorageId};
 use crate::locks::KeyedLocks;
 use crate::metadata::queries::{self, BlobArea, BlobFinal, StoreMeta};
-use crate::metadata::{self, Db, Role, migrations, now_ms, with_named_write_tx, with_write_tx};
+use crate::metadata::{self, Db, Role, migrations, now_ms, with_write_tx};
 use crate::s3::error::{S3Error, S3Result};
 use crate::telemetry::Metrics;
 
@@ -341,10 +341,8 @@ impl Store {
             let now = now_ms();
             let registered = self
                 .db
-                .write(move |c| {
-                    with_named_write_tx(c, "register", |tx| {
-                        queries::register_blob(tx, &id, area, now)
-                    })
+                .write_tx("register", move |tx| {
+                    queries::register_blob(tx, &id, area, now)
                 })
                 .await?;
             if !registered {
@@ -368,7 +366,7 @@ impl Store {
         let after = self.garbage_after();
         let res = self
             .db
-            .write(move |c| with_write_tx(c, |tx| queries::abandon_blob(tx, &id, after)))
+            .write_tx("", move |tx| queries::abandon_blob(tx, &id, after))
             .await;
         if let Err(e) = res {
             // The row stays WRITING; restart recovery reclaims it.
@@ -563,14 +561,12 @@ impl Store {
         self.integrity_fault(&format!("storage ID {id}: {why}"));
         let _ = self
             .db
-            .write(move |c| {
-                with_write_tx(c, |tx| {
-                    tx.execute(
-                        "DELETE FROM blobs WHERE storage_id = ?1 AND state = 'writing'",
-                        [id.as_bytes().as_slice()],
-                    )?;
-                    Ok(())
-                })
+            .write_tx("", move |tx| {
+                tx.execute(
+                    "DELETE FROM blobs WHERE storage_id = ?1 AND state = 'writing'",
+                    [id.as_bytes().as_slice()],
+                )?;
+                Ok(())
             })
             .await;
         S3Error::internal().with_detail(format!("storage ID collision: {why}"))

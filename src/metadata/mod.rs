@@ -194,8 +194,29 @@ pub fn with_read_tx<T>(
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
+/// Delivers a batched job's result once the shared commit outcome is known.
+type Finisher = Box<dyn FnOnce(CommitStatus) + Send>;
+
+/// A write transaction body. It runs inside its own savepoint of a shared
+/// group-commit transaction (or receives `None` if the transaction could not
+/// begin) and reports whether it succeeded.
+type TxBody = Box<dyn FnOnce(Option<&rusqlite::Transaction<'_>>) -> (bool, Finisher) + Send>;
+
+/// Maximum write transactions combined into one durable commit.
+const MAX_GROUP_COMMIT: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommitStatus {
+    Committed,
+    /// Definitely not committed (busy/locked or could not begin).
+    NotCommitted,
+    /// The commit may or may not have happened.
+    Uncertain,
+}
+
 enum Msg {
     Job(Job),
+    Tx(&'static str, TxBody),
     Stop,
 }
 
@@ -298,6 +319,61 @@ impl Db {
         res
     }
 
+    /// Run `f` as a write transaction. Concurrent callers are group-committed:
+    /// the writer combines queued transactions into one `BEGIN IMMEDIATE`
+    /// transaction with a savepoint per caller, so one durable commit (one
+    /// WAL sync) serves the whole batch. A caller's error rolls back only its
+    /// own savepoint. Results are delivered only after the shared commit, so
+    /// success always means durably committed. `name` labels the transition
+    /// for test failpoints.
+    pub async fn write_tx<T, F>(&self, name: &'static str, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&rusqlite::Transaction<'_>) -> Result<T> + Send + 'static,
+    {
+        let stats = self.inner.stats.clone();
+        stats.write_jobs.fetch_add(1, Ordering::Relaxed);
+        let (rtx, rrx) = oneshot::channel::<Result<T>>();
+        let body: TxBody = Box::new(move |tx| {
+            let r = match tx {
+                Some(tx) => std::panic::catch_unwind(AssertUnwindSafe(|| f(tx)))
+                    .unwrap_or_else(|_| Err(Error::other("metadata job panicked"))),
+                None => Err(Error::Overloaded("metadata transaction could not begin")),
+            };
+            let ok = r.is_ok();
+            let fin: Finisher = Box::new(move |status| {
+                let out = match (r, status) {
+                    (Err(e), _) => Err(e),
+                    (Ok(v), CommitStatus::Committed) => Ok(v),
+                    (Ok(_), CommitStatus::NotCommitted) => {
+                        Err(Error::Overloaded("metadata database busy"))
+                    }
+                    (Ok(_), CommitStatus::Uncertain) => Err(Error::CommitUncertain),
+                };
+                let _ = rtx.send(out);
+            });
+            (ok, fin)
+        });
+        let permit =
+            match tokio::time::timeout(self.inner.queue_wait, self.inner.writer.reserve()).await {
+                Ok(Ok(p)) => p,
+                Ok(Err(_)) => return Err(Error::other("metadata worker stopped")),
+                Err(_) => {
+                    stats.queue_rejections.fetch_add(1, Ordering::Relaxed);
+                    return Err(Error::Overloaded("metadata queue full"));
+                }
+            };
+        stats.write_queue_depth.fetch_add(1, Ordering::Relaxed);
+        permit.send(Msg::Tx(name, body));
+        let res = rrx
+            .await
+            .map_err(|_| Error::other("metadata worker dropped a job"))?;
+        if matches!(res, Err(Error::CommitUncertain)) {
+            stats.commit_uncertain.fetch_add(1, Ordering::Relaxed);
+        }
+        res
+    }
+
     /// Run a job on a read-only connection.
     pub async fn read<T, F>(&self, f: F) -> Result<T>
     where
@@ -363,6 +439,97 @@ where
         .map_err(|_| Error::other("metadata worker dropped a job"))?
 }
 
+/// Execute a batch of write transactions as one group commit.
+fn run_group(conn: &mut Connection, batch: Vec<(&'static str, TxBody)>) {
+    let mut names: Vec<&'static str> = batch
+        .iter()
+        .map(|(n, _)| *n)
+        .filter(|n| !n.is_empty())
+        .collect();
+    names.dedup();
+    let tx = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not begin metadata write transaction");
+            for (_, body) in batch {
+                let (_, fin) = body(None);
+                fin(CommitStatus::NotCommitted);
+            }
+            return;
+        }
+    };
+    let mut finishers = Vec::with_capacity(batch.len());
+    let mut broken = false;
+    for (_, body) in batch {
+        if broken {
+            let (_, fin) = body(None);
+            finishers.push(fin);
+            continue;
+        }
+        if tx.execute_batch("SAVEPOINT storlite_job").is_err() {
+            broken = true;
+            let (_, fin) = body(None);
+            finishers.push(fin);
+            continue;
+        }
+        let (ok, fin) = body(Some(&tx));
+        let end = if ok {
+            "RELEASE storlite_job"
+        } else {
+            "ROLLBACK TO storlite_job; RELEASE storlite_job"
+        };
+        if tx.execute_batch(end).is_err() {
+            broken = true;
+        }
+        finishers.push(fin);
+    }
+    if broken {
+        drop(tx);
+        for fin in finishers {
+            fin(CommitStatus::NotCommitted);
+        }
+        return;
+    }
+    for n in &names {
+        crate::failpoint::hit(&format!("before_commit:{n}"));
+    }
+    let injected = names
+        .iter()
+        .any(|n| crate::failpoint::io(&format!("commit:{n}")).is_err());
+    let status = if injected {
+        NEEDS_RECONNECT.with(|c| c.set(true));
+        tracing::error!("injected commit failure");
+        drop(tx);
+        CommitStatus::Uncertain
+    } else {
+        match tx.commit() {
+            Ok(()) => {
+                for n in &names {
+                    crate::failpoint::hit(&format!("after_commit:{n}"));
+                }
+                CommitStatus::Committed
+            }
+            Err(e) => {
+                let definite = matches!(
+                    e.sqlite_error_code(),
+                    Some(rusqlite::ErrorCode::DatabaseBusy)
+                        | Some(rusqlite::ErrorCode::DatabaseLocked)
+                );
+                if definite {
+                    CommitStatus::NotCommitted
+                } else {
+                    NEEDS_RECONNECT.with(|c| c.set(true));
+                    tracing::error!(error = %e, "metadata group commit failed with unknown outcome");
+                    CommitStatus::Uncertain
+                }
+            }
+        }
+    };
+    for fin in finishers {
+        fin(status);
+    }
+}
+
 fn spawn_worker(
     name: &str,
     conn: Connection,
@@ -376,30 +543,65 @@ fn spawn_worker(
         .name(name.to_string())
         .spawn(move || {
             let mut conn = Some(conn);
-            while let Some(msg) = rx.blocking_recv() {
-                let job = match msg {
-                    Msg::Job(j) => j,
-                    Msg::Stop => break,
+            let depth = match role {
+                Role::Writer => &stats.write_queue_depth,
+                Role::Reader => &stats.read_queue_depth,
+            };
+            let mut pending: std::collections::VecDeque<Msg> = std::collections::VecDeque::new();
+            loop {
+                let msg = match pending.pop_front() {
+                    Some(m) => m,
+                    None => match rx.blocking_recv() {
+                        Some(m) => {
+                            if !matches!(m, Msg::Stop) {
+                                depth.fetch_sub(1, Ordering::Relaxed);
+                            }
+                            m
+                        }
+                        None => break,
+                    },
                 };
-                let depth = match role {
-                    Role::Writer => &stats.write_queue_depth,
-                    Role::Reader => &stats.read_queue_depth,
-                };
-                depth.fetch_sub(1, Ordering::Relaxed);
+                if matches!(msg, Msg::Stop) {
+                    break;
+                }
                 if conn.is_none() {
                     match open_connection(&path, role, busy_timeout_ms) {
                         Ok(c) => conn = Some(c),
                         Err(e) => {
                             tracing::error!(error = %e, "cannot reopen metadata connection");
                             // The job's sender observes a dropped oneshot.
-                            drop(job);
+                            drop(msg);
                             continue;
                         }
                     }
                 }
                 let c = conn.as_mut().expect("connection present");
                 let started = Instant::now();
-                job(c);
+                match msg {
+                    Msg::Job(job) => job(c),
+                    Msg::Tx(name, body) => {
+                        // Gather already-queued transactions for one commit.
+                        let mut batch = vec![(name, body)];
+                        while batch.len() < MAX_GROUP_COMMIT {
+                            match rx.try_recv() {
+                                Ok(Msg::Tx(n, b)) => {
+                                    depth.fetch_sub(1, Ordering::Relaxed);
+                                    batch.push((n, b));
+                                }
+                                Ok(other) => {
+                                    if !matches!(other, Msg::Stop) {
+                                        depth.fetch_sub(1, Ordering::Relaxed);
+                                    }
+                                    pending.push_back(other);
+                                    break;
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        run_group(c, batch);
+                    }
+                    Msg::Stop => unreachable!(),
+                }
                 if role == Role::Writer {
                     stats
                         .write_micros_total

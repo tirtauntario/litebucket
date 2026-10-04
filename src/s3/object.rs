@@ -25,11 +25,11 @@ use crate::error::Error;
 use crate::fsutil::Area;
 use crate::ids::BucketId;
 use crate::keys::ObjectKey;
+use crate::metadata::now_ms;
 use crate::metadata::queries::{
     self, BlobArea, ContentHeaders, DeleteOutcome, NewObject, ObjectCommit, ObjectRow,
     UserMetadata, WriteConditions,
 };
-use crate::metadata::{now_ms, with_named_write_tx};
 use crate::store::{CopySource, Reconciled, StagedBlob, Store, blocking};
 
 /// Facts for the object row, minus the blob (known only after publication).
@@ -92,10 +92,8 @@ pub async fn publish_and_commit(
                 .await;
             let res = store
                 .db
-                .write(move |c| {
-                    with_named_write_tx(c, "object", |tx| {
-                        queries::commit_object(tx, &new, &cond, garbage_after)
-                    })
+                .write_tx("object", move |tx| {
+                    queries::commit_object(tx, &new, &cond, garbage_after)
                 })
                 .await;
             match res {
@@ -487,10 +485,8 @@ async fn delete_one(store: &Arc<Store>, bucket: BucketId, key: &ObjectKey) -> S3
     let after = store.garbage_after();
     let res = store
         .db
-        .write(move |c| {
-            with_named_write_tx(c, "delete", |tx| {
-                queries::delete_object(tx, &bucket, &k, after)
-            })
+        .write_tx("delete", move |tx| {
+            queries::delete_object(tx, &bucket, &k, after)
         })
         .await?;
     match res {

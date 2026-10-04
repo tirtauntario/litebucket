@@ -15,7 +15,6 @@ use super::request::S3Request;
 use super::xml::XmlWriter;
 use super::{Cx, lookup_bucket, read_control_body};
 use crate::metadata::queries;
-use crate::metadata::with_write_tx;
 use crate::store::Store;
 
 const MAX_RULES: usize = 100;
@@ -153,7 +152,7 @@ pub async fn put_bucket_cors(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     let ok = cx
         .store
         .db
-        .write(move |c| with_write_tx(c, |tx| queries::set_bucket_cors(tx, &id, Some(&json))))
+        .write_tx("", move |tx| queries::set_bucket_cors(tx, &id, Some(&json)))
         .await?;
     if !ok {
         return Err(S3Error::no_such_bucket());
@@ -201,7 +200,7 @@ pub async fn delete_bucket_cors(cx: &Cx) -> S3Result<Response<Body>> {
     let id = bucket.id;
     cx.store
         .db
-        .write(move |c| with_write_tx(c, |tx| queries::set_bucket_cors(tx, &id, None)))
+        .write_tx("", move |tx| queries::set_bucket_cors(tx, &id, None))
         .await?;
     Ok(response(
         StatusCode::NO_CONTENT,
