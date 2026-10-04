@@ -452,6 +452,23 @@ impl Client {
         self.send("PUT", &format!("/{name}"), "", &[], Payload::Signed(vec![])).await
     }
 
+    /// Header-signed request head with UNSIGNED-PAYLOAD, for driving a slow
+    /// body over a raw TCP stream. Returns the full HTTP/1.1 request head.
+    pub fn signed_head_unsigned_payload(&self, method: &str, path: &str, content_length: usize) -> String {
+        let (date, amz) = now_amz();
+        let scope = format!("{date}/{}/s3/aws4_request", self.region);
+        let block = format!("host:{}\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:{amz}\n", self.host);
+        let signed = "host;x-amz-content-sha256;x-amz-date";
+        let cr = format!("{method}\n{path}\n\n{block}\n{signed}\nUNSIGNED-PAYLOAD");
+        let sts = format!("AWS4-HMAC-SHA256\n{amz}\n{scope}\n{}", sha_hex(cr.as_bytes()));
+        let key = sigv4::signing_key(&self.secret, &date, &self.region, "s3");
+        let sig = hex::encode(sigv4::hmac(&key, sts.as_bytes()));
+        format!(
+            "{method} {path} HTTP/1.1\r\nhost: {}\r\nx-amz-content-sha256: UNSIGNED-PAYLOAD\r\nx-amz-date: {amz}\r\ncontent-length: {content_length}\r\nauthorization: AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed}, Signature={sig}\r\n\r\n",
+            self.host, self.id
+        )
+    }
+
     /// Presigned URL (query authentication) for `method` on `path`.
     pub fn presign(&self, method: &str, path: &str, expires: i64, at: Option<i64>) -> String {
         let (date, amz) = match at {

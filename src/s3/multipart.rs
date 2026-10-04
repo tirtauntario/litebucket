@@ -524,7 +524,7 @@ impl CompletionJob {
     /// failure.
     async fn run(self, fp: [u8; 32], manifest_json: String) -> S3Result<Receipt> {
         let store = self.store.clone();
-        let output = crate::ids::StorageId::random();
+        let output = crate::ids::StorageId::allocate();
         let (idc, now) = (self.upload.upload_id.clone(), now_ms());
         let begin = store
             .db

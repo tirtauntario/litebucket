@@ -289,7 +289,7 @@ impl Store {
     pub async fn new_blob(self: &Arc<Self>, area: BlobArea) -> S3Result<WriteTicket> {
         self.check_writable()?;
         for _ in 0..8 {
-            let id = StorageId::random();
+            let id = StorageId::allocate();
             let data = self.data.clone();
             let fs_area = area.fs_area();
             let occupied = blocking(move || {

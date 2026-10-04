@@ -71,8 +71,9 @@ type JobFn = fn(Arc<Store>) -> std::pin::Pin<Box<dyn std::future::Future<Output 
 
 fn spawn_loop(store: Arc<Store>, cancel: CancellationToken, every: Duration, name: &'static str, job: JobFn) -> JoinHandle<()> {
     tokio::spawn(async move {
-        // Run once shortly after start, then on the interval.
-        let mut delay = Duration::from_millis(500).min(every);
+        // First run after one interval: startup recovery already handled
+        // interrupted work, and this keeps startup free of background writes.
+        let mut delay = every;
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => return,
@@ -103,6 +104,7 @@ pub async fn gc_once(store: &Arc<Store>) -> Result<usize> {
     }
     let data = store.data.clone();
     let ids: Vec<_> = batch.iter().map(|(id, area, _)| (*id, *area)).collect();
+    crate::failpoint::hit("gc_before_unlink");
     let removed = blocking(move || {
         let mut dirs = HashMap::new();
         let mut ok = Vec::new();
@@ -132,6 +134,7 @@ pub async fn gc_once(store: &Arc<Store>) -> Result<usize> {
         Ok(ok)
     })
     .await?;
+    crate::failpoint::hit("gc_after_unlink");
     let n = removed.len();
     let rows = removed.clone();
     let deleted = store
