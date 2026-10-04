@@ -255,7 +255,13 @@ async fn dispatch(cx: Cx, body: Body) -> S3Result<Response<Body>> {
 /// Read a bounded control body (XML), verifying payload signing and any
 /// supplied integrity values.
 pub async fn read_control_body(cx: &Cx, body: Body, limit: usize, require_integrity: bool) -> S3Result<bytes::Bytes> {
-    let integrity = integrity::ChecksumRequest::parse(&cx.req, &cx.auth.payload)?;
+    let mut integrity = integrity::ChecksumRequest::parse(&cx.req, &cx.auth.payload)?;
+    if cx.op == capabilities::Op::CompleteMultipartUpload {
+        // On completion, x-amz-checksum-* headers describe the assembled
+        // object, not the XML body.
+        integrity.header = None;
+        integrity.sdk = None;
+    }
     if require_integrity && integrity.content_md5.is_none() && integrity.algorithm().is_none() {
         return Err(S3Error::invalid_request(
             "Missing required header for this request: Content-MD5 or x-amz-checksum-*",

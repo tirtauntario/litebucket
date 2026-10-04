@@ -416,18 +416,12 @@ pub async fn complete(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
         ));
     }
     let mut selected = Vec::with_capacity(manifest.len());
-    let mut total: u64 = 0;
-    for (i, mp) in manifest.iter().enumerate() {
-        let part = by_number.get(&mp.number).ok_or_else(|| {
+    for mp in &manifest {
+        let part = by_number.get(&mp.number).filter(|p| p.etag == mp.etag).ok_or_else(|| {
             S3Error::invalid_part(
                 "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.",
             )
         })?;
-        if part.etag != mp.etag {
-            return Err(S3Error::invalid_part(
-                "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.",
-            ));
-        }
         match (&mp.checksum, &part.checksum) {
             (Some((a, v)), Some(stored)) => {
                 if *a != stored.algorithm || *v != stored.value {
@@ -447,18 +441,21 @@ pub async fn complete(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
             }
             (None, _) => {}
         }
-        let last = i + 1 == manifest.len();
+        selected.push((*part).clone());
+    }
+    let mut total: u64 = 0;
+    for (i, part) in selected.iter().enumerate() {
+        let last = i + 1 == selected.len();
         if !last && part.size < MIN_PART_BYTES {
             return Err(S3Error::entity_too_small()
                 .with_extra("ProposedSize", part.size.to_string())
                 .with_extra("MinSizeAllowed", MIN_PART_BYTES.to_string())
-                .with_extra("PartNumber", mp.number.to_string()));
+                .with_extra("PartNumber", part.part_number.to_string()));
         }
         if part.size > store.config.limits.max_part_bytes {
             return Err(S3Error::entity_too_large());
         }
         total = total.checked_add(part.size).ok_or_else(S3Error::entity_too_large)?;
-        selected.push((*part).clone());
     }
     if total > store.config.limits.max_object_bytes {
         return Err(S3Error::entity_too_large()
