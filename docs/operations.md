@@ -18,7 +18,9 @@
 
 ## Configuration
 
-`docs/examples/config.example.toml` is the starting shape. Unknown keys are
+`storlite config template` prints a commented file listing every setting
+with its default (`--docker` for the container layout; sources:
+`docs/examples/config.example.toml`, `deploy/config.toml`). Unknown keys are
 errors. Relative paths resolve against the config file's directory. Byte
 values are integers (`_bytes`), durations carry units (`_seconds`, `_ms`).
 
@@ -26,16 +28,6 @@ Precedence: built-in defaults < config file < environment
 (`STORLITE_HTTP_LISTEN`, `STORLITE_MANAGEMENT_LISTEN`, `STORLITE_LOG_LEVEL`,
 `STORLITE_LOG_FORMAT`) < CLI flags (`serve --listen`, `--management-listen`,
 `--log-level`). Secrets never come from flags.
-
-Keys added beyond the example (all optional):
-
-| Key | Default | Purpose |
-|---|---|---|
-| `credentials_allow_group_read` | `false` | Accept a 0640-style credentials file (secret mounts with a dedicated group). World-readable is always refused. |
-| `http.trusted_proxy_addresses` | `[]` | Required with `trusted_proxy_mode`; only these peer IPs may connect. |
-| `http.max_clock_skew_seconds` | `900` | Header-signed request skew. |
-| `database.queue_wait_ms` | `5000` | Wait for metadata queue space before `SlowDown`. |
-| `limits.admission_timeout_ms` | `5000` | Wait for a transfer permit before `SlowDown`. |
 
 Transport rules enforced at startup:
 

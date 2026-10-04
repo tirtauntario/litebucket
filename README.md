@@ -34,7 +34,7 @@ silently ignored. There is no replication or high availability.
 
 | Method | Command |
 |---|---|
-| Docker (Linux amd64/arm64) | `docker pull ghcr.io/tirtauntario/storlite:latest` |
+| Docker Compose (Linux amd64/arm64) | `curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy/setup.sh \| sh` ([details](#quick-start-docker)) |
 | Install script (Linux, macOS) | `curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/install.sh \| sh` |
 | Prebuilt binary | Download from [Releases](https://github.com/tirtauntario/storlite/releases) |
 | From source (Rust 1.97+) | `cargo install --locked --git https://github.com/tirtauntario/storlite` |
@@ -44,14 +44,43 @@ macOS builds are meant for development; Linux is the supported production
 platform. [docs/installation.md](docs/installation.md) covers every method,
 checksum verification, systemd, Docker Compose, TLS and upgrades.
 
+## Quick start (Docker)
+
+One command creates everything (config, an admin key, a self-signed TLS
+certificate), initializes the store and starts it:
+
+```sh
+mkdir storlite && cd storlite
+curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy/setup.sh | sh
+```
+
+You end up with:
+
+```text
+storlite/
+├── compose.yaml          service definition
+├── .env                  image version and host port
+├── config.toml           all settings, commented, with defaults
+└── secrets/
+    ├── credentials.toml  access keys (the admin key's secret is here)
+    ├── tls.crt           self-signed; replace with a real certificate
+    └── tls.key
+```
+
+To change a setting, edit `config.toml` and run `docker compose restart`. To
+change the port or image version, edit `.env` and run `docker compose up -d`.
+The script prints a ready-to-run AWS CLI example. To use your own hostname in
+the certificate, run `STORLITE_HOSTNAMES=storage.example.com sh` instead of
+`sh`. See [docs/installation.md#docker](docs/installation.md#docker) for the
+manual steps, real certificates and upgrades.
+
 ## Quick start (standalone, local only)
 
 This setup serves plain HTTP on `127.0.0.1` for local testing only.
 
 ```sh
 mkdir storlite && cd storlite
-curl -fsSLO https://raw.githubusercontent.com/tirtauntario/storlite/main/docs/examples/config.example.toml
-mv config.example.toml config.toml        # loopback HTTP, data in ./data
+storlite config template > config.toml     # loopback HTTP, data in ./data
 
 # One admin credential, written with mode 0600. The secret is in this file.
 storlite credentials generate --id admin --enable --global-grant admin --output credentials.toml
@@ -71,34 +100,6 @@ aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://documents
 aws --endpoint-url http://127.0.0.1:9000 s3 cp ./report.pdf s3://documents/
 aws --endpoint-url http://127.0.0.1:9000 s3 ls s3://documents/
 ```
-
-## Quick start (Docker)
-
-The container listens on all interfaces, so it requires TLS. A self-signed
-certificate is enough for a trial.
-
-```sh
-mkdir storlite && cd storlite
-base=https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy
-curl -fsSL -O "$base/compose.yaml" -O "$base/config.container.toml"
-
-mkdir -m 0700 secrets
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/secrets:/out" \
-  ghcr.io/tirtauntario/storlite:latest \
-  credentials generate --id admin --enable --global-grant admin --output /out/credentials.toml
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 365 \
-  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-  -keyout secrets/tls.key -out secrets/tls.crt
-chmod 0400 secrets/*
-sudo chown 65532:65532 secrets/*     # Linux only: the container runs as uid 65532
-
-docker compose run --rm storlite init --config /etc/storlite/config.toml
-docker compose up -d
-aws --endpoint-url https://localhost:9000 --ca-bundle secrets/tls.crt s3 ls
-```
-
-See [docs/installation.md#docker](docs/installation.md#docker) for real
-certificates, reverse proxies and upgrades.
 
 ## Client configuration
 
@@ -168,8 +169,8 @@ const s3 = new S3Client({
 | [docs/benchmarks.md](docs/benchmarks.md) | Measured resource use and throughput |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, pull requests |
 | [docs/releasing.md](docs/releasing.md) | How releases are built and published (maintainers) |
-| [docs/SPEC.md](docs/SPEC.md), [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | The design specification and acceptance matrix |
-| [docs/implementation-report.md](docs/implementation-report.md), [docs/implementation-status.md](docs/implementation-status.md), [docs/test-evidence.md](docs/test-evidence.md), [docs/architecture-decisions/](docs/architecture-decisions/) | Design decisions, acceptance results and test evidence |
+| [docs/SPEC.md](docs/SPEC.md) | The original design specification |
+| [docs/implementation-report.md](docs/implementation-report.md), [docs/test-evidence.md](docs/test-evidence.md), [docs/architecture-decisions/](docs/architecture-decisions/) | Design decisions and test evidence |
 
 ## License
 

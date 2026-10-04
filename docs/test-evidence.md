@@ -84,7 +84,7 @@ refuses SigV2).
 
 ## Container smoke test
 
-`deploy/Dockerfile` image with `deploy/config.container.toml` (TLS, secrets
+`deploy/Dockerfile` image with the container config (now `deploy/config.toml`; TLS, secrets
 volume owned by uid 65532 mode 0400, `--read-only`, `--cap-drop ALL`,
 `no-new-privileges`): `storlite init` → `serve` → AWS CLI 12 MB multipart
 upload/download over TLS (ETag `…-2`, byte-identical) → `healthcheck` OK →
@@ -96,14 +96,18 @@ upload/download over TLS (ETag `…-2`, byte-identical) → `healthcheck` OK →
 |---|---|---|
 | `cargo test --locked --features failpoints --target aarch64-unknown-linux-musl` (static release target) | Linux container (`rust:1.97.1-slim-trixie` + `musl-tools`, ext4 volume) | 82 unit + 57 integration: **139 passed, 0 failed** |
 | `cargo build --release --locked --target aarch64-unknown-linux-musl` | same | 6.9 MB static binary; `storlite --version` OK |
-| README standalone quick start, run verbatim (`credentials generate --enable --global-grant admin` → `init` → `serve` → AWS CLI `mb`/`cp`/`ls` → SIGTERM) | macOS | pass; shutdown `drained: true` |
-| README Docker quick start, run verbatim with the local image (`STORLITE_IMAGE=storlite:local`): credential generated via the image as the host user, self-signed cert, `compose run init`, `compose up` | Docker Desktop 29.7.2 | container `healthy`; AWS CLI `mb`/`cp`/`ls` over TLS with `--ca-bundle` |
+| README standalone quick start, run verbatim (`config template` → `credentials generate --enable --global-grant admin` → `init` → `serve` → AWS CLI `mb`/`cp`/`ls` → SIGTERM) | macOS | pass; shutdown `drained: true` |
+| Manual Docker setup with the local image (`STORLITE_IMAGE=storlite:local`): credential generated via the image as the host user, self-signed cert, `compose run init`, `compose up` | Docker Desktop 29.7.2 | container `healthy`; AWS CLI `mb`/`cp`/`ls` over TLS with `--ca-bundle` |
+| `deploy/setup.sh` with the local image, `STORLITE_PORT=9443`, extra certificate names | Docker Desktop 29.7.2 | creates all files, initializes, container `healthy`; the printed AWS CLI commands work. Re-run: skips existing files, reports "already initialized". Invalid `config.toml`: setup stops and shows the parse error |
+| Config edit flow: `sed -i` on `config.toml` (`max_buckets = 1`) → `docker compose restart` | Docker Desktop 29.7.2 | new value in effect (second CreateBucket → `TooManyBuckets`) |
 
 The GitHub Actions workflows (`.github/workflows/ci.yml`, `release.yml`) and
 `install.sh` against a published release run only on GitHub; their first
 run happens with the first tag. The Linux `chown 65532` step of the Docker
 quick start was covered by the earlier container smoke test (secrets volume
-owned by 65532, mode 0400), not by the compose bind-mount flow.
+owned by 65532, mode 0400), not by the compose bind-mount flow; the same
+applies to the Linux `chown` branch of `deploy/setup.sh` (checked with
+shellcheck only).
 
 ## Not run
 

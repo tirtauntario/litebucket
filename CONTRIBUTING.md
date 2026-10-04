@@ -55,8 +55,9 @@ Chrome for the browser suite. Run it with only the suites you have (for example
   bodies or (by default) object keys.
 - Match the surrounding style. `cargo fmt` is the formatter.
 
-`CLAUDE.md` and `docs/AGENTS.md` summarize the architecture for both human
-and AI-assisted contributors.
+`CLAUDE.md` summarizes the architecture for both human and AI-assisted
+contributors. Design rationale lives in `docs/architecture-decisions/` and
+`docs/implementation-report.md`.
 
 ## Pull requests
 

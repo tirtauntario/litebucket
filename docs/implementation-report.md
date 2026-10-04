@@ -2,8 +2,7 @@
 
 This report covers what was built against `docs/SPEC.md` 1.0, how, what was
 verified, and **every assumption made where the specification left room**.
-Supporting detail: `docs/implementation-status.md` (acceptance matrix),
-`docs/test-evidence.md`, `docs/benchmarks.md`, `docs/compatibility.md`,
+Supporting detail: `docs/test-evidence.md`, `docs/benchmarks.md`, `docs/compatibility.md`,
 `docs/operations.md`, ADRs in `docs/architecture-decisions/`.
 
 ## 1. Outcome
@@ -203,7 +202,17 @@ Each is recorded where it applies; this list is the single overview.
 45. Request logs carry `request_id`, `operation`, `credential`, `status`,
     `code`, `detail`, `duration_ms`, `payload` mode; object keys only with
     `log_object_keys = true`.
-46. Interop tooling (Python venv with Boto3 and AWS CLI v2, generated Rails app)
+46. Configuration templates: `storlite config template [--docker]` prints the
+    commented templates `docs/examples/config.example.toml` and
+    `deploy/config.toml` (embedded at build time). A unit test uncomments every
+    documented `# key = value` line and checks that it equals the built-in
+    default, so the templates cannot drift from the code.
+47. Docker setup: `deploy/setup.sh` creates `compose.yaml`, `.env` (image
+    pinned to the exact version), `config.toml`, an admin credential and a
+    self-signed certificate. It never overwrites existing files, sets
+    ownership to uid 65532 on Linux, and runs the explicit `init` (the spec
+    forbids implicit initialization) before `compose up`.
+48. Interop tooling (Python venv with Boto3 and AWS CLI v2, generated Rails app)
     lives in git-ignored `.interop/`; nothing is installed system-wide.
 
 ## 5. Known limitations and follow-ups

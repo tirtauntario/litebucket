@@ -110,9 +110,14 @@ sudo install -d -o root -g storlite -m 0750 /etc/storlite
 sudo install -d -o storlite -g storlite -m 0750 /var/lib/storlite
 ```
 
-**2. Write the configuration.** Start from
-[`examples/config.example.toml`](examples/config.example.toml) (also in the
-release archive). A minimal production file:
+**2. Write the configuration.** `storlite config template` prints a
+commented file with every setting and its default
+([`examples/config.example.toml`](examples/config.example.toml)). Generate it
+and edit it, or write a minimal production file:
+
+```sh
+storlite config template | sudo tee /etc/storlite/config.toml >/dev/null
+```
 
 ```toml
 # /etc/storlite/config.toml
@@ -198,57 +203,115 @@ volume, and the entrypoint is `storlite`, so any subcommand can be run with
 `docker run ... ghcr.io/tirtauntario/storlite <subcommand>`. A health check
 probes `/readyz` on the internal management listener.
 
-### Docker Compose
-
-**1. Download the compose file and container config:**
+### Docker Compose: one-step setup
 
 ```sh
 mkdir storlite && cd storlite
-base=https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy
-curl -fsSL -O "$base/compose.yaml" -O "$base/config.container.toml"
-mkdir -m 0700 secrets
+curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy/setup.sh | sh
 ```
 
-**2. Create the secrets.** The compose file expects three files in
-`./secrets/`: `credentials.toml`, `tls.crt` and `tls.key`.
+[`deploy/setup.sh`](../deploy/setup.sh) does the following, never overwriting a
+file that already exists:
+
+1. Downloads `compose.yaml`.
+2. Writes `.env` with the image pinned to the exact version it pulled (for
+   example `ghcr.io/tirtauntario/storlite:0.1.0`) and the host port.
+3. Writes `config.toml` from `storlite config template --docker`. Every
+   setting is listed, commented, with its default.
+4. Creates `secrets/credentials.toml` with an enabled `admin` key.
+5. Creates a self-signed certificate in `secrets/tls.crt` and `secrets/tls.key`,
+   unless you put your own certificate there first.
+6. Sets file modes, and on Linux gives the secrets to the container user
+   (uid 65532, using `sudo`).
+7. Validates `config.toml`, initializes the data volume, starts the
+   container, waits until it is healthy, and prints a test command.
+
+Options are environment variables, set on the `sh` side of the pipe:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `STORLITE_PORT` | `9000` | Host port |
+| `STORLITE_HOSTNAMES` | none | Extra certificate names/IPs, comma-separated (`storage.example.com,10.0.0.5`) |
+| `STORLITE_IMAGE` | `ghcr.io/tirtauntario/storlite:latest` | Image to use (pinned to its version in `.env`) |
+| `STORLITE_START` | `1` | `0` creates the files only, so you can edit `config.toml` before the first start |
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy/setup.sh \
+  | STORLITE_PORT=443 STORLITE_HOSTNAMES=storage.example.com STORLITE_START=0 sh
+```
+
+The script is safe to re-run: it fills in whatever is missing and reports an
+already initialized volume. Read the admin secret with
+`cat secrets/credentials.toml` (`sudo cat` on Linux).
+
+### Editing the configuration
+
+All server settings live in `config.toml` next to `compose.yaml`. It is
+mounted read-only into the container. Every available setting is in the file
+as a commented `# key = default` line. Remove the `# ` and change the value:
+
+```toml
+[limits]
+max_object_bytes = 10737418240        # was: # max_object_bytes = 107374182400
+```
+
+Then validate and apply:
+
+```sh
+docker compose run --rm storlite config check --config /etc/storlite/config.toml
+docker compose restart storlite
+```
+
+| File | What it controls | Apply with |
+|---|---|---|
+| `config.toml` | Server settings (limits, timeouts, logging, TLS file paths, proxy mode) | `docker compose restart storlite` |
+| `.env` | `STORLITE_IMAGE` (version) and `STORLITE_PORT` | `docker compose up -d` |
+| `secrets/credentials.toml` | Access keys and grants ([format](#creating-application-credentials)) | `docker compose kill -s HUP storlite` (no restart needed) |
+| `secrets/tls.crt`, `secrets/tls.key` | TLS certificate chain and key | `docker compose restart storlite` |
+
+On Linux the files in `secrets/` belong to uid 65532, so edit them with `sudo`
+and keep them mode 0400. To get a fresh copy of the commented template, for
+example after an upgrade adds settings, run
+`docker run --rm ghcr.io/tirtauntario/storlite:<version> config template --docker`.
+
+Do not change `data_dir`, `credentials_file` or the `tls_*` paths in
+`config.toml`. They are paths inside the container, and `compose.yaml` mounts
+the files there. `region` is fixed once the store is initialized.
+
+### Docker Compose: manual setup
+
+These are the same steps the script runs, if you prefer to do them yourself:
+
+```sh
+mkdir storlite && cd storlite
+curl -fsSL -O https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy/compose.yaml
+image=ghcr.io/tirtauntario/storlite:latest
+
+# configuration
+docker run --rm "$image" config template --docker > config.toml
+
 # admin credential (written with mode 0600, owned by you)
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/secrets:/out" \
-  ghcr.io/tirtauntario/storlite:latest \
+mkdir -m 0700 secrets
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/secrets:/out" "$image" \
   credentials generate --id admin --enable --global-grant admin --output /out/credentials.toml
 
-# TLS: copy a real certificate and key to secrets/tls.crt and secrets/tls.key,
-# or create a self-signed pair for a trial:
+# TLS: copy a real certificate chain and key to secrets/tls.crt and
+# secrets/tls.key, or create a self-signed pair:
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 365 \
   -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
   -keyout secrets/tls.key -out secrets/tls.crt
-```
 
-**3. Set ownership.** Compose mounts these files read-only with their host
-owner and mode. storlite refuses a credentials file that group or others can
-read.
-
-```sh
+# Compose mounts secrets with their host owner and mode. storlite refuses a
+# credentials file that group or others can read.
 chmod 0400 secrets/*
-# Linux only: the container user must own the files.
-sudo chown 65532:65532 secrets/*
-```
+sudo chown 65532:65532 secrets/*     # Linux only; Docker Desktop maps access itself
 
-Docker Desktop (macOS, Windows) maps file access for you, so skip the
-`chown` there. On Linux, read the secret afterwards with
-`sudo cat secrets/credentials.toml`.
-
-**4. Initialize and start.**
-
-```sh
 docker compose run --rm storlite init --config /etc/storlite/config.toml
 docker compose up -d
-docker compose ps                         # STATUS shows (healthy) when ready
-docker compose logs -f
+docker compose ps                    # STATUS shows (healthy) when ready
 ```
 
-**5. Test it:**
+Test it:
 
 ```sh
 export AWS_ACCESS_KEY_ID=admin
@@ -268,8 +331,6 @@ in-flight writes drain. Data lives in the named volume `storlite-data`.
 
 | Task | Command |
 |---|---|
-| Reload credentials | `docker compose kill -s HUP storlite` |
-| Apply config or certificate changes | `docker compose restart storlite` |
 | Offline check | `docker compose stop && docker compose run --rm storlite check --config /etc/storlite/config.toml --full` |
 | Backup | see below |
 
@@ -289,7 +350,7 @@ docker compose start
 ```sh
 git clone https://github.com/tirtauntario/storlite && cd storlite
 docker build -f deploy/Dockerfile -t storlite:local .
-cd deploy && STORLITE_IMAGE=storlite:local docker compose up -d
+STORLITE_IMAGE=storlite:local sh deploy/setup.sh ~/storlite
 ```
 
 ## TLS and reverse proxies

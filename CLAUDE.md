@@ -4,21 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-`storlite` is a single-host S3-compatible object store (Rust/Axum, embedded SQLite metadata, two-level sharded files). All spec milestones 0–6 are implemented; `docs/implementation-status.md` tracks acceptance evidence and `docs/implementation-report.md` records decisions and assumptions. Keep both current when behavior changes.
+`storlite` is a single-host S3-compatible object store (Rust/Axum, embedded SQLite metadata, two-level sharded files). All spec milestones are implemented. `docs/implementation-report.md` records decisions and assumptions and `docs/test-evidence.md` records what was run; keep both current when behavior changes.
 
 ## Specification
 
 The spec bundle lives in `docs/` and is the authoritative contract:
 
 - `docs/SPEC.md` — full contract; invariants **INV-01..INV-14** are mandatory.
-- `docs/IMPLEMENTATION_PLAN.md` — milestones 0–6 and the acceptance matrix (DEP-01, FS-01, …).
-- `docs/AGENTS.md`, `docs/reference-schema.sql`, `docs/examples/*.toml`.
+- `docs/examples/*.toml` — config/credentials templates (embedded in the binary and parsed by unit tests).
+- The original implementation plan, agent prompts and reference schema were build-time material and are no longer in the repo; `migrations/` is the schema source of truth.
 
 Conventions for applying the bundle to this repo:
 
 - **Name:** the spec's placeholder `compact-s3` is `storlite` everywhere (binary, CLI, logs, metrics, image).
 - **Layout:** one Cargo package at the repo root (`Cargo.toml`, `src/`, `migrations/`, `tests/`, `deploy/`). No workspace or subdirectory crate.
-- **Paths:** spec references to `SPEC.md`, `IMPLEMENTATION_PLAN.md`, `examples/…` mean `docs/…`. Generated docs (`implementation-status.md`, `compatibility.md`, `operations.md`, `test-evidence.md`, `benchmarks.md`, `architecture-decisions/`) also live in `docs/`.
+- **Paths:** spec references to `SPEC.md` and `examples/…` mean `docs/…`. All docs (`installation.md`, `operations.md`, `compatibility.md`, `test-evidence.md`, `benchmarks.md`, `releasing.md`, `architecture-decisions/`) live in `docs/`.
+- **Config templates:** `docs/examples/config.example.toml` (standalone) and `deploy/config.toml` (Docker) are printed by `storlite config template [--docker]`. Every `# key = value` line must equal the code default (unit test enforces); update them when adding config keys.
 - **Platform:** dev host is macOS; Linux durability tests are authoritative (run them in Docker, see `docs/test-evidence.md`).
 
 ## Commands

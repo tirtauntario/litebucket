@@ -22,10 +22,13 @@ First public release.
   commit before acknowledgement) with crash recovery at every boundary.
 - Scoped credentials (bucket + prefix grants) with live reload on SIGHUP;
   `credentials generate --enable --global-grant` creates a directly usable key.
+- `config template [--docker]` prints a commented configuration file with
+  every setting and its default.
 - Offline `doctor`, `check --full`, `gc`, bucket quotas, verified
   backup/restore; `/livez`, `/readyz`, Prometheus `/metrics`.
 - Static Linux (musl) and macOS release binaries, a multi-arch distroless
-  image on GHCR, an install script and a systemd unit.
+  image on GHCR, an install script, a one-step Docker Compose setup script
+  (`deploy/setup.sh`) and a systemd unit.
 
 [Unreleased]: https://github.com/tirtauntario/storlite/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/tirtauntario/storlite/releases/tag/v0.1.0
