@@ -1,0 +1,70 @@
+# Proposed configuration contract, not an implemented application's config.
+# Paths are relative to this file. For a local trial, copy into the repository
+# root as config.toml, then create a real protected credentials.toml.
+data_dir = "./data"
+region = "us-east-1"
+credentials_file = "./credentials.toml"
+
+[http]
+listen = "127.0.0.1:9000"
+allow_insecure_loopback_http = true
+trusted_proxy_mode = false
+max_header_bytes = 32768
+max_header_count = 128
+max_request_target_bytes = 16384
+header_timeout_seconds = 10
+body_idle_timeout_seconds = 60
+# For direct non-loopback service, enable TLS and disable loopback-only HTTP.
+# tls_certificate_file = "/run/secrets/server.crt"
+# tls_private_key_file = "/run/secrets/server.key"
+# trusted_proxy_mode requires a separately documented restricted-network policy;
+# it must not treat arbitrary X-Forwarded-* headers as proof of secure transport.
+
+[management]
+listen = "127.0.0.1:9001"
+metrics_enabled = true
+
+[database]
+reader_connections = 2
+writer_queue_capacity = 256
+reader_queue_capacity = 128
+busy_timeout_ms = 5000
+# WAL, FULL synchronization, and foreign keys are required, not speed toggles.
+
+[limits]
+active_uploads = 16
+active_downloads = 64
+active_copies = 2
+active_multipart_assemblies = 2
+max_single_put_bytes = 5368709120
+max_part_bytes = 5368709120
+max_object_bytes = 107374182400
+max_temporary_bytes = 214748364800
+min_disk_free_bytes = 1073741824
+min_disk_free_percent = 5
+min_free_inodes = 10000
+max_buckets = 1000
+max_listing_entries = 1000
+max_delete_entries = 1000
+max_xml_body_bytes = 4194304
+max_cors_body_bytes = 65536
+max_user_metadata_bytes = 2048
+transfer_buffer_bytes = 262144
+# No default bucket logical quota; set per-bucket quotas with the offline CLI.
+
+[multipart]
+max_active_uploads = 1024
+max_parts = 10000
+inactive_expiration_seconds = 604800
+receipt_retention_seconds = 86400
+
+[maintenance]
+garbage_batch_size = 100
+garbage_grace_seconds = 60
+garbage_interval_seconds = 60
+shutdown_grace_seconds = 30
+
+[logging]
+format = "json"
+level = "info"
+log_object_keys = false
