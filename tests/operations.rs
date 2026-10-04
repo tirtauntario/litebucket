@@ -444,3 +444,34 @@ async fn graceful_shutdown_drains_and_releases_lock() {
     // Lock released after shutdown: offline commands can run.
     let (_d, _conn, _m, _) = storlite::store::open_offline(&cfg, false).unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http_03_idle_body_times_out_and_preserves_object() {
+    let (s, c) = setup_with("[http]\nbody_idle_timeout_seconds = 1\nallow_insecure_loopback_http = true\nlisten = \"127.0.0.1:0\"\n").await;
+    c.put("/docs/k", b"original").await;
+    let head = c.signed_head_unsigned_payload("PUT", "/docs/k", 1000);
+    let mut t = tcp_connect(&s.base);
+    t.write_all(head.as_bytes()).unwrap();
+    t.write_all(&[1u8; 10]).unwrap();
+    // Stall longer than the idle timeout.
+    let mut resp = String::new();
+    let _ = t.read_to_string(&mut resp);
+    assert!(resp.starts_with("HTTP/1.1 400"), "{resp}");
+    assert!(resp.contains("RequestTimeout"));
+    assert_eq!(c.get("/docs/k", "").await.body, b"original");
+    assert_eq!(s.store().capacity.reserved_bytes(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn trusted_proxy_mode_refuses_other_peers() {
+    let s = TestServer::start_with(
+        "[http]\nlisten = \"127.0.0.1:0\"\ntrusted_proxy_mode = true\ntrusted_proxy_addresses = [\"10.9.8.7\"]\n",
+    )
+    .await;
+    // 127.0.0.1 is not the configured proxy: the connection is closed.
+    let mut t = tcp_connect(&s.base);
+    let _ = write!(t, "GET / HTTP/1.1\r\nhost: x\r\n\r\n");
+    let mut buf = Vec::new();
+    let n = t.read_to_end(&mut buf).unwrap_or(0);
+    assert_eq!(n, 0, "no response to a non-proxy peer");
+}

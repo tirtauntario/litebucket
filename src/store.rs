@@ -53,7 +53,7 @@ pub struct Store {
     pub credentials: CredentialStore,
     ready: AtomicBool,
     pub startup: StartupReport,
-    gauges: [std::sync::atomic::AtomicU64; 3],
+    gauges: [std::sync::atomic::AtomicU64; 5],
 }
 
 impl std::fmt::Debug for Store {
@@ -205,6 +205,19 @@ impl Store {
         self.gauges[0].store(blobs, Ordering::Relaxed);
         self.gauges[1].store(bytes, Ordering::Relaxed);
         self.gauges[2].store(uploads, Ordering::Relaxed);
+    }
+
+    /// (objects, logical bytes) summed over all buckets.
+    pub fn logical_totals(&self) -> (u64, u64) {
+        (
+            self.gauges[3].load(Ordering::Relaxed),
+            self.gauges[4].load(Ordering::Relaxed),
+        )
+    }
+
+    pub fn set_logical_totals(&self, objects: u64, bytes: u64) {
+        self.gauges[3].store(objects, Ordering::Relaxed);
+        self.gauges[4].store(bytes, Ordering::Relaxed);
     }
 
     pub fn set_ready(&self, ready: bool) {

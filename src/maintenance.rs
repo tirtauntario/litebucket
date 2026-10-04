@@ -280,14 +280,20 @@ pub async fn checkpoint(store: &Arc<Store>) -> Result<()> {
 }
 
 pub async fn refresh_gauges(store: &Arc<Store>) -> Result<()> {
-    let (blobs, bytes, uploads) = store
+    let (blobs, bytes, uploads, objects, logical) = store
         .db
         .read(|c| {
             let (b, y) = queries::garbage_backlog(c)?;
-            Ok((b, y, queries::active_upload_count(c)?))
+            let (o, l): (i64, i64) = c.query_row(
+                "SELECT coalesce(sum(object_count), 0), coalesce(sum(logical_bytes), 0) FROM buckets",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            Ok((b, y, queries::active_upload_count(c)?, o, l))
         })
         .await?;
     store.set_maintenance_gauges(blobs as u64, bytes as u64, uploads as u64);
+    store.set_logical_totals(objects as u64, logical as u64);
     Ok(())
 }
 

@@ -68,13 +68,15 @@ pub fn with_test_limits(extra: &str) -> String {
 
 pub fn write_config(dir: &Path, extra: &str) -> PathBuf {
     let extra = with_test_limits(extra);
+    let http = if extra.contains("[http]\n") {
+        String::new()
+    } else {
+        "[http]\nlisten = \"127.0.0.1:0\"\nallow_insecure_loopback_http = true\n".to_string()
+    };
     let cfg = format!(
         r#"data_dir = "./data"
 credentials_file = "./credentials.toml"
-[http]
-listen = "127.0.0.1:0"
-allow_insecure_loopback_http = true
-[management]
+{http}[management]
 listen = "127.0.0.1:0"
 [logging]
 format = "text"
