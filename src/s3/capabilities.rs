@@ -284,6 +284,7 @@ fn op_headers(op: Op) -> &'static [&'static str] {
             "x-amz-copy-source-if-unmodified-since",
             "x-amz-metadata-directive",
             "x-amz-checksum-algorithm",
+            "x-amz-object-annotation-directive",
         ],
         Op::GetObject | Op::HeadObject => &["x-amz-checksum-mode"],
         Op::CreateMultipartUpload => &[
@@ -426,6 +427,13 @@ pub fn validate(req: &S3Request, op: Op, owner_id: &str) -> S3Result<()> {
         return Err(S3Error::not_implemented(
             "Object Lock is not supported by this service.",
         ));
+    }
+    // Objects here never carry annotations, so excluding or copying them is
+    // exact; anything else would need the unsupported annotation APIs.
+    if let Some(v) = req.header("x-amz-object-annotation-directive")?
+        && !matches!(v, "EXCLUDE" | "COPY")
+    {
+        return Err(S3Error::not_implemented("Object annotations are not supported by this service."));
     }
     if let Some(v) = req.header("x-amz-request-payer")?
         && v != "requester"
