@@ -140,6 +140,7 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
         if cfg.logging.log_object_keys {
             key_for_log = req.key.as_ref().map(|k| k.as_str().to_string());
         }
+        auth::reject_unsupported_schemes(&req)?;
         let op = capabilities::resolve(&req)?;
         op_name = op.name();
         if !store.is_ready() {

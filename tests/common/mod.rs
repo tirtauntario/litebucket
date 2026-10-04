@@ -407,7 +407,18 @@ impl Client {
         }
         rb = rb.header("authorization", auth);
         let req = rb.body(http_body_util::Full::new(bytes::Bytes::from(body))).unwrap();
-        let resp = self.http.request(req).await.unwrap();
+        let resp = match self.http.request(req).await {
+            Ok(r) => r,
+            // The server may reject early and close while the body is still
+            // being sent; report that as status 0.
+            Err(_) => {
+                return Resp {
+                    status: 0,
+                    headers: http::HeaderMap::new(),
+                    body: Vec::new(),
+                };
+            }
+        };
         let status = resp.status().as_u16();
         let headers = resp.headers().clone();
         let body = http_body_util::BodyExt::collect(resp.into_body())

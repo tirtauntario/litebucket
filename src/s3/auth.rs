@@ -88,14 +88,21 @@ fn unsigned_ok(name: &str) -> bool {
     name == "x-amz-user-agent"
 }
 
-pub fn authenticate(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) -> S3Result<AuthContext> {
-    let has_header = req.headers.contains_key(http::header::AUTHORIZATION);
-    let has_query = req.has_q("X-Amz-Signature") || req.has_q("X-Amz-Algorithm") || req.has_q("X-Amz-Credential");
+/// Reject signature schemes this service never accepts (checked before any
+/// other request validation so the client gets a precise error).
+pub fn reject_unsupported_schemes(req: &S3Request) -> S3Result<()> {
     if req.has_q("Signature") || req.has_q("AWSAccessKeyId") {
         return Err(S3Error::invalid_request(
             "The authorization mechanism you have provided is not supported. Please use AWS4-HMAC-SHA256.",
         ));
     }
+    Ok(())
+}
+
+pub fn authenticate(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) -> S3Result<AuthContext> {
+    let has_header = req.headers.contains_key(http::header::AUTHORIZATION);
+    let has_query = req.has_q("X-Amz-Signature") || req.has_q("X-Amz-Algorithm") || req.has_q("X-Amz-Credential");
+    reject_unsupported_schemes(req)?;
     if req.headers.contains_key("x-amz-security-token") || req.has_q("X-Amz-Security-Token") {
         return Err(S3Error::invalid_request("Temporary security credentials are not supported by this service."));
     }
