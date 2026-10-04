@@ -7,13 +7,15 @@ require 'digest'
 require 'net/http'
 
 ENDPOINT = ENV.fetch('STORLITE_ENDPOINT')
-raise "refusing non-local endpoint #{ENDPOINT}" unless ENDPOINT.start_with?('http://127.0.0.1:')
+raise "refusing non-local endpoint #{ENDPOINT}" unless ENDPOINT.match?(%r{\Ahttps?://127\.0\.0\.1:})
+CA = ENV['STORLITE_CA_BUNDLE']
 
 class RubySdkTest < Minitest::Test
   def self.client
     @client ||= Aws::S3::Client.new(
       endpoint: ENDPOINT, region: ENV.fetch('STORLITE_REGION'), force_path_style: true,
-      credentials: Aws::Credentials.new(ENV.fetch('STORLITE_KEY_ID'), ENV.fetch('STORLITE_SECRET'))
+      credentials: Aws::Credentials.new(ENV.fetch('STORLITE_KEY_ID'), ENV.fetch('STORLITE_SECRET')),
+      **(CA ? { ssl_ca_bundle: CA } : {})
     )
   end
 
@@ -105,10 +107,11 @@ class RubySdkTest < Minitest::Test
   def test_presigned_urls
     signer = Aws::S3::Presigner.new(client: s3)
     put = URI(signer.presigned_url(:put_object, bucket: bucket, key: 'presigned.txt', expires_in: 300))
-    res = Net::HTTP.start(put.host, put.port) { |h| h.request(Net::HTTP::Put.new(put).tap { |r| r.body = 'via presign' }) }
+    http = ->(u, &blk) { Net::HTTP.start(u.host, u.port, use_ssl: u.scheme == 'https', ca_file: CA, &blk) }
+    res = http.(put) { |h| h.request(Net::HTTP::Put.new(put).tap { |r| r.body = 'via presign' }) }
     assert_equal '200', res.code
     get = URI(signer.presigned_url(:get_object, bucket: bucket, key: 'presigned.txt', expires_in: 300))
-    assert_equal 'via presign', Net::HTTP.get(get)
+    assert_equal 'via presign', http.(get) { |h| h.request(Net::HTTP::Get.new(get)).body }
   end
 
   def test_errors_map_to_sdk_exceptions

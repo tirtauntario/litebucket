@@ -120,6 +120,7 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
         .map(str::to_string);
     let mut op_name = "Unknown";
     let mut credential = String::new();
+    let mut payload_mode = "";
     let mut bucket_name: Option<String> = None;
     let mut key_for_log: Option<String> = None;
 
@@ -182,6 +183,7 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
             },
         )?;
         credential = auth.credential.id.clone();
+        payload_mode = auth.payload.label();
         if op.is_mutation() {
             store.check_writable()?;
         }
@@ -238,6 +240,7 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
             code,
             detail,
             duration_ms = elapsed.as_millis() as u64,
+            payload = payload_mode,
             key = key_for_log.as_deref().unwrap_or(""),
         );
     } else {
@@ -250,6 +253,7 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
             code,
             detail,
             duration_ms = elapsed.as_millis() as u64,
+            payload = payload_mode,
             key = key_for_log.as_deref().unwrap_or(""),
         );
     }

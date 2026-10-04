@@ -2,6 +2,7 @@
 # Run real-client interoperability suites against a local storlite.
 #
 #   scripts/interop.sh [ruby] [boto3] [awscli] [rails] [browser]   (default: all)
+#   INTEROP_TLS=1 scripts/interop.sh ...   # serve HTTPS with a throwaway self-signed cert
 #
 # Isolation: ambient AWS_* variables and config files are cleared, and every
 # suite refuses any endpoint other than 127.0.0.1. Nothing contacts AWS.
@@ -22,12 +23,22 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/storlite-interop.XXXXXX")
 cleanup() { [ -n "${PID:-}" ] && kill "$PID" 2>/dev/null && wait "$PID" 2>/dev/null; rm -rf "$WORK"; }
 trap cleanup EXIT
 
+SCHEME=http
+TLS_LINES="allow_insecure_loopback_http = true"
+if [ "${INTEROP_TLS:-0}" = "1" ]; then
+  SCHEME=https
+  openssl req -x509 -newkey rsa:2048 -nodes -keyout "$WORK/key.pem" -out "$WORK/cert.pem" -days 2 \
+    -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>&1
+  TLS_LINES="tls_certificate_file = \"./cert.pem\"
+tls_private_key_file = \"./key.pem\""
+  export STORLITE_CA_BUNDLE="$WORK/cert.pem"
+fi
 cat > "$WORK/config.toml" <<CFG
 data_dir = "./data"
 credentials_file = "./credentials.toml"
 [http]
 listen = "127.0.0.1:$PORT"
-allow_insecure_loopback_http = true
+$TLS_LINES
 [management]
 listen = "127.0.0.1:$MPORT"
 [limits]
@@ -53,7 +64,7 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 
-export STORLITE_ENDPOINT="http://127.0.0.1:$PORT"
+export STORLITE_ENDPOINT="$SCHEME://127.0.0.1:$PORT"
 export STORLITE_KEY_ID=interop-admin
 export STORLITE_SECRET=interopsecretinteropsecretinterop01
 export STORLITE_REGION=us-east-1
@@ -71,6 +82,20 @@ for s in "${SUITES[@]}"; do
     *) echo "unknown suite $s"; status=1 ;;
   esac
 done
+echo "=== payload modes used by clients (operation, mode, count) ==="
+python3 - "$WORK/serve.log" <<'PY' || true
+import json, sys, collections
+c = collections.Counter()
+for line in open(sys.argv[1]):
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if e.get("event") == "request" and e.get("payload") and e["operation"] in ("PutObject", "UploadPart"):
+        c[(e["operation"], e["payload"])] += 1
+for (op, mode), n in sorted(c.items()):
+    print(f"{op:10} {mode:28} {n}")
+PY
 echo "=== server errors (5xx) ==="
 grep '"status":5' "$WORK/serve.log" | head -5 || echo "none"
 exit $status

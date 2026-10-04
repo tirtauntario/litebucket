@@ -5,6 +5,7 @@ import hashlib
 import os
 import secrets
 import unittest
+import ssl
 import urllib.request
 
 import boto3
@@ -13,7 +14,8 @@ from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 
 ENDPOINT = os.environ["STORLITE_ENDPOINT"]
-if not ENDPOINT.startswith("http://127.0.0.1:"):
+CA = os.environ.get("STORLITE_CA_BUNDLE")
+if not (ENDPOINT.startswith("http://127.0.0.1:") or ENDPOINT.startswith("https://127.0.0.1:")):
     raise SystemExit(f"refusing non-local endpoint {ENDPOINT}")
 
 
@@ -24,6 +26,7 @@ def client():
         region_name=os.environ["STORLITE_REGION"],
         aws_access_key_id=os.environ["STORLITE_KEY_ID"],
         aws_secret_access_key=os.environ["STORLITE_SECRET"],
+        verify=CA if CA else None,
         # SigV4 is required; botocore's legacy presigner default would use SigV2.
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, retries={"max_attempts": 2}),
     )
@@ -132,9 +135,10 @@ class Boto3Test(unittest.TestCase):
             S3.put_object(Bucket=self.bucket, Key="once", Body=b"2", IfNoneMatch="*")
         self.assertEqual(e.exception.response["Error"]["Code"], "PreconditionFailed")
         put_url = S3.generate_presigned_url("put_object", Params={"Bucket": self.bucket, "Key": "pre"}, ExpiresIn=300)
-        urllib.request.urlopen(urllib.request.Request(put_url, data=b"presigned", method="PUT")).read()
+        ctx = ssl.create_default_context(cafile=CA) if CA else None
+        urllib.request.urlopen(urllib.request.Request(put_url, data=b"presigned", method="PUT"), context=ctx).read()
         get_url = S3.generate_presigned_url("get_object", Params={"Bucket": self.bucket, "Key": "pre"}, ExpiresIn=300)
-        self.assertEqual(urllib.request.urlopen(get_url).read(), b"presigned")
+        self.assertEqual(urllib.request.urlopen(get_url, context=ctx).read(), b"presigned")
 
     def test_bucket_operations_and_errors(self):
         self.assertIn(self.bucket, [b["Name"] for b in S3.list_buckets()["Buckets"]])

@@ -44,6 +44,17 @@ impl PayloadDecl {
         })
     }
 
+    /// Bounded label for logs.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Sha256(_) => "signed",
+            Self::Unsigned => "unsigned",
+            Self::StreamingSigned => "streaming-signed",
+            Self::StreamingSignedTrailer => "streaming-signed-trailer",
+            Self::StreamingUnsignedTrailer => "streaming-unsigned-trailer",
+        }
+    }
+
     pub fn is_streaming(&self) -> bool {
         matches!(
             self,

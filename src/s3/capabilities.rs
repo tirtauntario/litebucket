@@ -433,7 +433,9 @@ pub fn validate(req: &S3Request, op: Op, owner_id: &str) -> S3Result<()> {
     if let Some(v) = req.header("x-amz-object-annotation-directive")?
         && !matches!(v, "EXCLUDE" | "COPY")
     {
-        return Err(S3Error::not_implemented("Object annotations are not supported by this service."));
+        return Err(S3Error::not_implemented(
+            "Object annotations are not supported by this service.",
+        ));
     }
     if let Some(v) = req.header("x-amz-request-payer")?
         && v != "requester"
