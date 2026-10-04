@@ -24,11 +24,10 @@ pub struct Config {
     pub data_dir: PathBuf,
     #[serde(default = "default_region")]
     pub region: String,
-    pub credentials_file: PathBuf,
-    /// Accept a group-readable credentials file (for example a secret mount with a
-    /// dedicated group). World-readable files are always rejected.
     #[serde(default)]
-    pub credentials_allow_group_read: bool,
+    pub secrets: SecretsConfig,
+    #[serde(default)]
+    pub admin: AdminConfig,
     #[serde(default)]
     pub http: HttpConfig,
     #[serde(default)]
@@ -50,6 +49,41 @@ pub struct Config {
 
 fn default_region() -> String {
     "us-east-1".into()
+}
+
+/// How access-key secrets are stored in the metadata database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SecretProtection {
+    /// AES-256-GCM under the master key in `master_key_file`.
+    #[default]
+    Encrypted,
+    /// Stored as-is; protected only by data-directory permissions.
+    Plaintext,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct SecretsConfig {
+    pub protection: SecretProtection,
+    /// Required for `encrypted`. With `plaintext`, still needed once to
+    /// decrypt secrets that were stored encrypted.
+    pub master_key_file: Option<PathBuf>,
+}
+
+/// The local admin API (Unix socket; peer uid must be the server's or root).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct AdminConfig {
+    pub socket: PathBuf,
+}
+
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            socket: PathBuf::from("./admin.sock"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -322,7 +356,10 @@ impl Config {
             }
         };
         resolve(&mut self.data_dir);
-        resolve(&mut self.credentials_file);
+        resolve(&mut self.admin.socket);
+        if let Some(p) = self.secrets.master_key_file.as_mut() {
+            resolve(p);
+        }
         if let Some(p) = self.http.tls_certificate_file.as_mut() {
             resolve(p);
         }
@@ -366,6 +403,27 @@ impl Config {
 
     pub fn validate(&self) -> Result<()> {
         validate_region(&self.region)?;
+        match (&self.secrets.protection, &self.secrets.master_key_file) {
+            (SecretProtection::Encrypted, None) => {
+                return Err(Error::config(
+                    "secrets.protection = \"encrypted\" requires secrets.master_key_file",
+                ));
+            }
+            (_, Some(p)) if p.starts_with(&self.data_dir) => {
+                return Err(Error::config(
+                    "secrets.master_key_file must be outside data_dir (backups copy the data directory's database, never the key)",
+                ));
+            }
+            _ => {}
+        }
+        if self.admin.socket.starts_with(&self.data_dir) {
+            return Err(Error::config("admin.socket must be outside data_dir"));
+        }
+        if self.admin.socket.as_os_str().len() > 100 {
+            return Err(Error::config(
+                "admin.socket path is too long for a Unix socket (max 100 bytes)",
+            ));
+        }
         let listen = self.http_listen()?;
         let mgmt = self.management_listen()?;
         if listen.port() != 0 && listen == mgmt {
@@ -630,6 +688,11 @@ impl Config {
             "region": self.region,
             "http_listen": self.http.listen,
             "tls": self.tls_enabled(),
+            "secret_protection": match self.secrets.protection {
+                SecretProtection::Encrypted => "encrypted",
+                SecretProtection::Plaintext => "plaintext",
+            },
+            "admin_socket": self.admin.socket,
             "trusted_proxy_mode": self.http.trusted_proxy_mode,
             "management_listen": self.management.listen,
             "active_uploads": self.limits.active_uploads,

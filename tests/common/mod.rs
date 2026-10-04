@@ -9,7 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 use storlite::config::Config;
-use storlite::credentials::{CredentialSet, CredentialStore};
 use storlite::server::Running;
 use storlite::sigv4;
 use storlite::store::Store;
@@ -19,33 +18,52 @@ pub const APP: (&str, &str) = ("app-key", "appsecretappsecretappsecretappsec01")
 pub const READER: (&str, &str) = ("reader-key", "readersecretreadersecretreadersec01");
 pub const REGION: &str = "us-east-1";
 
-pub const CREDENTIALS: &str = r#"
-[[credentials]]
-id = "admin-key"
-secret_access_key = "adminsecretadminsecretadminsecret01"
-enabled = true
-global_grants = ["admin"]
+/// Fixed test keys: (id, secret, global grants, grants as `bucket[/prefix]:actions`).
+pub const KEYS: &[(&str, &str, &[&str], &[&str])] = &[
+    (ADMIN.0, ADMIN.1, &["admin"], &[]),
+    (
+        APP.0,
+        APP.1,
+        &["list_buckets"],
+        &["docs:read,list,write,delete"],
+    ),
+    (READER.0, READER.1, &[], &["docs/customers/123/:read,list"]),
+];
 
-[[credentials]]
-id = "app-key"
-secret_access_key = "appsecretappsecretappsecretappsec01"
-enabled = true
-global_grants = ["list_buckets"]
-[[credentials.grants]]
-bucket = "docs"
-prefix = ""
-actions = ["read", "list", "write", "delete"]
-
-[[credentials]]
-id = "reader-key"
-secret_access_key = "readersecretreadersecretreadersec01"
-enabled = true
-global_grants = []
-[[credentials.grants]]
-bucket = "docs"
-prefix = "customers/123/"
-actions = ["read", "list"]
-"#;
+/// Insert the fixed test keys into a freshly initialized store (offline).
+pub fn seed_keys(cfg: &Config) {
+    use storlite::metadata::queries;
+    let codec = storlite::store::secret_codec(cfg).unwrap();
+    let (_data, conn, meta, _) = storlite::store::open_offline(cfg, true).unwrap();
+    for (id, secret, global, grants) in KEYS {
+        let sealed = codec.seal(&meta.store_id, id, secret).unwrap();
+        let grants: Vec<queries::GrantRow> = grants
+            .iter()
+            .map(|spec| {
+                let g = storlite::credentials::Grant::parse_spec(spec).unwrap();
+                queries::GrantRow {
+                    bucket: g.bucket.clone(),
+                    prefix: g.prefix.clone(),
+                    actions: g.action_names().into_iter().map(String::from).collect(),
+                }
+            })
+            .collect();
+        queries::insert_credential(
+            &conn,
+            &queries::NewCredential {
+                id,
+                secret: &sealed,
+                enabled: true,
+                description: "",
+                expires_at_ms: None,
+                global,
+                grants: &grants,
+                now_ms: storlite::metadata::now_ms(),
+            },
+        )
+        .unwrap();
+    }
+}
 
 pub struct TestServer {
     pub dir: tempfile::TempDir,
@@ -73,9 +91,15 @@ pub fn write_config(dir: &Path, extra: &str) -> PathBuf {
     } else {
         "[http]\nlisten = \"127.0.0.1:0\"\nallow_insecure_loopback_http = true\n".to_string()
     };
+    let secrets = if extra.contains("[secrets]\n") {
+        String::new()
+    } else {
+        "[secrets]\nmaster_key_file = \"./master.key\"\n".to_string()
+    };
     let cfg = format!(
         r#"data_dir = "./data"
-credentials_file = "./credentials.toml"
+{secrets}[admin]
+socket = "./admin.sock"
 {http}[management]
 listen = "127.0.0.1:0"
 [logging]
@@ -86,12 +110,6 @@ level = "warn"
     );
     let path = dir.join("config.toml");
     std::fs::write(&path, cfg).unwrap();
-    let creds = dir.join("credentials.toml");
-    if !creds.exists() {
-        std::fs::write(&creds, CREDENTIALS).unwrap();
-        std::fs::set_permissions(&creds, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-            .unwrap();
-    }
     path
 }
 
@@ -112,6 +130,7 @@ impl TestServer {
         let config_path = write_config(dir.path(), extra);
         let cfg = load_config(&config_path);
         storlite::store::initialize(&cfg).unwrap();
+        seed_keys(&cfg);
         let mut s = Self {
             dir,
             config_path,
@@ -125,8 +144,7 @@ impl TestServer {
 
     pub async fn boot(&mut self) {
         let cfg = load_config(&self.config_path);
-        let creds = CredentialSet::load(&cfg.credentials_file, false).unwrap();
-        let store = Store::open(cfg, CredentialStore::new(creds)).unwrap();
+        let store = Store::open(cfg).unwrap();
         let running = storlite::server::start(store).await.unwrap();
         self.base = format!("http://{}", running.s3_addr);
         self.mgmt = format!("http://{}", running.management_addr);
@@ -158,6 +176,34 @@ impl TestServer {
 
     pub fn admin(&self) -> Client {
         self.client(ADMIN)
+    }
+
+    pub fn admin_socket(&self) -> PathBuf {
+        self.running.as_ref().unwrap().admin_socket.clone()
+    }
+
+    /// Call the admin API over its Unix socket. Returns (ok, JSON body or error message).
+    pub async fn admin_api(
+        &self,
+        method: &str,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let socket = self.admin_socket();
+        let (method, path) = (method.to_string(), path.to_string());
+        tokio::task::spawn_blocking(move || {
+            let c = storlite::admin::client::AdminClient::new(&socket);
+            let r: storlite::error::Result<serde_json::Value> = if method == "GET" {
+                c.get(&path)
+            } else if method == "DELETE" {
+                c.delete(&path)
+            } else {
+                c.send(&method, &path, &body)
+            };
+            r.map_err(|e| e.to_string())
+        })
+        .await
+        .unwrap()
     }
 }
 

@@ -10,15 +10,25 @@
 
 # Relative paths resolve against this file's directory.
 data_dir = "./data"
-credentials_file = "./credentials.toml"
 
 # Region that clients must sign requests for. Fixed when the store is
 # initialized; startup refuses a different value later.
 region = "us-east-1"
 
-# Accept a credentials file that is group-readable (0640), for secret mounts
-# with a dedicated group. World-readable is always refused.
-# credentials_allow_group_read = false
+[secrets]
+# Access keys live in the metadata database. "encrypted" seals each secret
+# with AES-256-GCM under the master key file (`storlite init` creates it if it
+# is missing; back it up separately and keep it out of data_dir). "plaintext"
+# relies on file permissions only, and every backup then contains usable
+# secrets. Changing the mode converts all stored secrets at the next start;
+# switching to plaintext needs the master key one last time.
+# protection = "encrypted"
+master_key_file = "./master.key"
+
+[admin]
+# Local admin API used by `storlite admin ...`. Only the server's own user and
+# root may connect (checked with the peer's credentials, plus mode 0600).
+# socket = "./admin.sock"
 
 [http]
 # S3 API listener. Loopback plain HTTP is for local use only.

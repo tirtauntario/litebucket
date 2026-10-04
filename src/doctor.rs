@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 use crate::config::Config;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::fsutil::{Area, DataDir, sync_dir};
 use crate::ids::StorageId;
 use crate::metadata::queries;
@@ -64,6 +64,7 @@ pub fn doctor(cfg: &Config, full: bool) -> Result<bool> {
         count(&conn, "SELECT count(*) FROM objects")?,
         count(&conn, "SELECT coalesce(sum(logical_bytes), 0) FROM buckets")?
     );
+    report_keys(cfg, &conn, &meta.store_id, &mut problems)?;
     for st in ["writing", "ready", "garbage"] {
         println!(
             "blobs {st}: {}",
@@ -278,11 +279,44 @@ pub fn gc(cfg: &Config, apply: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn set_quota(cfg: &Config, name: &str, quota: Option<u64>) -> Result<()> {
-    let (_data, mut conn, _, _) = open_offline(cfg, true)?;
-    let ok = with_write_tx(&mut conn, |tx| queries::set_bucket_quota(tx, name, quota))?;
-    if !ok {
-        return Err(Error::other(format!("no such bucket: {name}")));
+/// Access-key summary: counts, storage scheme vs. configured protection, and
+/// whether the configured master key opens every stored secret.
+fn report_keys(
+    cfg: &Config,
+    conn: &Connection,
+    store_id: &crate::ids::StoreId,
+    problems: &mut Vec<String>,
+) -> Result<()> {
+    if migrations::verify(conn)?.iter().all(|v| *v < 3) {
+        println!("access keys: none (migration 3 pending; applied by `serve`)");
+        return Ok(());
+    }
+    let enabled = count(conn, "SELECT count(*) FROM credentials WHERE enabled = 1")?;
+    let disabled = count(conn, "SELECT count(*) FROM credentials WHERE enabled = 0")?;
+    let admins = queries::usable_admin_count(conn, now_ms())?;
+    let (plain, sealed) = queries::secret_scheme_counts(conn)?;
+    let mode = match cfg.secrets.protection {
+        crate::config::SecretProtection::Encrypted => "encrypted",
+        crate::config::SecretProtection::Plaintext => "plaintext",
+    };
+    println!(
+        "access keys: {enabled} enabled, {disabled} disabled, {admins} usable admin; secrets stored: {sealed} encrypted, {plain} plaintext (configured: {mode})"
+    );
+    if (mode == "encrypted" && plain > 0) || (mode == "plaintext" && sealed > 0) {
+        println!(
+            "note: stored secrets are converted to the configured protection at the next start"
+        );
+    }
+    if admins == 0 {
+        problems.push(
+            "no enabled admin access key (create one offline with `storlite admin recover`)".into(),
+        );
+    }
+    match crate::store::secret_codec(cfg)
+        .and_then(|codec| crate::admin::load_credential_set(conn, &codec, store_id, now_ms()))
+    {
+        Ok(_) => {}
+        Err(e) => problems.push(format!("access keys cannot be loaded: {e}")),
     }
     Ok(())
 }

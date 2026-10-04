@@ -52,7 +52,10 @@ impl Node {
         let (port, mport) = (free_port(), free_port());
         let cfg = format!(
             r#"data_dir = "./data"
-credentials_file = "./credentials.toml"
+[secrets]
+master_key_file = "./master.key"
+[admin]
+socket = "./admin.sock"
 [http]
 listen = "127.0.0.1:{port}"
 allow_insecure_loopback_http = true
@@ -65,10 +68,6 @@ level = "info"
 "#
         );
         std::fs::write(dir.path().join("config.toml"), cfg).unwrap();
-        let creds = dir.path().join("credentials.toml");
-        std::fs::write(&creds, CREDENTIALS).unwrap();
-        std::fs::set_permissions(&creds, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-            .unwrap();
         let out = Command::new(BIN)
             .args(["init", "--config"])
             .arg(dir.path().join("config.toml"))
@@ -79,6 +78,7 @@ level = "info"
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
+        seed_keys(&load_config(&dir.path().join("config.toml")));
         Self {
             dir,
             port,
@@ -602,4 +602,59 @@ async fn ops_07_logs_exclude_secrets_and_keys() {
         assert!(!log.contains(secret), "log leaks {secret}");
     }
     let _ = Path::new("");
+}
+
+fn admin_cli(node: &Node, args: &[&str]) -> std::process::Output {
+    Command::new(BIN)
+        .arg("admin")
+        .arg("--config")
+        .arg(node.config())
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// An admin change and its audit record commit together or not at all, a
+/// crash leaves a stale socket that the next start replaces, and issued
+/// secrets never reach the server log.
+#[tokio::test(flavor = "multi_thread")]
+async fn admin_changes_are_atomic_across_crashes() {
+    for (point, committed) in [("before_commit:admin", false), ("after_commit:admin", true)] {
+        let mut node = Node::new("");
+        let fp = format!("{point}=abort");
+        let (mut child, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
+        let out = admin_cli(
+            &node,
+            &["key", "create", "--id", "crash-key", "--format", "env"],
+        );
+        assert!(
+            !out.status.success(),
+            "{point}: no response after the crash"
+        );
+        assert!(wait_crash(&mut child), "{point}: server did not crash");
+        let (child, run) = node.spawn(&[]);
+        let shown = admin_cli(&node, &["key", "show", "crash-key"]);
+        assert_eq!(shown.status.success(), committed, "{point}");
+        let audit = admin_cli(&node, &["--json", "audit"]);
+        let audit = String::from_utf8_lossy(&audit.stdout).to_string();
+        assert_eq!(audit.contains("crash-key"), committed, "{point}: {audit}");
+        // A later change works and its secret is never logged.
+        let out = admin_cli(&node, &["key", "create", "--format", "env"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let env = String::from_utf8(out.stdout).unwrap();
+        let secret = env
+            .lines()
+            .find_map(|l| l.strip_prefix("AWS_SECRET_ACCESS_KEY="))
+            .unwrap()
+            .to_string();
+        stop(child);
+        let log = std::fs::read_to_string(node.log(run)).unwrap();
+        assert!(log.contains("admin_change"), "{log}");
+        assert!(!log.contains(&secret), "log leaks an issued secret");
+        verify_offline(&node, point);
+    }
 }

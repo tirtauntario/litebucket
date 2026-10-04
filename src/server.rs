@@ -1,6 +1,6 @@
-//! Listeners: the S3 endpoint (HTTP/1.1, optional TLS) and the restricted
-//! management endpoint (`/livez`, `/readyz`, `/metrics`), plus graceful
-//! shutdown.
+//! Listeners: the S3 endpoint (HTTP/1.1, optional TLS), the restricted
+//! management endpoint (`/livez`, `/readyz`, `/metrics`), and the local admin
+//! API socket, plus graceful shutdown.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -26,9 +26,11 @@ use crate::store::Store;
 pub struct Running {
     pub s3_addr: SocketAddr,
     pub management_addr: SocketAddr,
+    pub admin_socket: std::path::PathBuf,
     stop: watch::Sender<bool>,
     s3_task: JoinHandle<()>,
     mgmt_task: JoinHandle<()>,
+    admin_task: JoinHandle<()>,
     maintenance: crate::maintenance::Maintenance,
     pub store: Arc<Store>,
 }
@@ -85,6 +87,15 @@ pub async fn start(store: Arc<Store>) -> Result<Running> {
             })
             .await;
     });
+
+    let admin_socket = cfg.admin.socket.clone();
+    let admin_listener = crate::admin::api::bind(&admin_socket)?;
+    let admin_task = tokio::spawn(crate::admin::api::serve(
+        admin_listener,
+        admin_socket.clone(),
+        store.clone(),
+        stop_rx.clone(),
+    ));
 
     let listener = TcpListener::bind(cfg.http_listen()?).await?;
     let s3_addr = listener.local_addr()?;
@@ -158,15 +169,18 @@ pub async fn start(store: Arc<Store>) -> Result<Running> {
         event = "listening",
         s3 = %s3_addr,
         management = %management_addr,
+        admin_socket = %admin_socket.display(),
         tls = cfg.tls_enabled(),
         "storlite is ready"
     );
     Ok(Running {
         s3_addr,
         management_addr,
+        admin_socket,
         stop: stop_tx,
         s3_task,
         mgmt_task,
+        admin_task,
         maintenance,
         store,
     })
@@ -185,6 +199,7 @@ impl Running {
             .await
             .is_ok();
         let _ = self.mgmt_task.await;
+        let _ = self.admin_task.await;
         self.maintenance.stop().await;
         store.tracker.close();
         let tasks_drained = tokio::time::timeout(grace, store.tracker.wait())

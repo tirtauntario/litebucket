@@ -4,8 +4,9 @@
 //! file referenced by that snapshot (objects and committed parts) in the same
 //! sharded layout, a JSON-lines file manifest, and a versioned manifest. It is
 //! marked `BACKUP_INCOMPLETE` until every file and directory entry is durable;
-//! only then is `BACKUP_COMPLETE` published. Credentials and configuration are
-//! not included.
+//! only then is `BACKUP_COMPLETE` published. Access keys live in the
+//! database and are therefore included (encrypted unless the store uses
+//! plaintext protection); the master key and the configuration are not.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -21,6 +22,7 @@ use crate::fsutil::{self, Area, DataDir, open_dir, sync_dir, sync_fd};
 use crate::ids::StorageId;
 use crate::metadata::queries::{self, BlobArea};
 use crate::metadata::{self, migrations, now_ms, with_write_tx};
+use crate::secrets::{MasterKey, SecretCodec};
 use crate::store::open_offline;
 
 pub const FORMAT: &str = "storlite-backup-v1";
@@ -257,7 +259,20 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
         meta.store_id,
         dest_abs.display()
     );
-    println!("note: credentials and configuration files are not included; back them up separately");
+    let (plain, sealed) = key_scheme_counts(&dest_abs.join(fsutil::DB_FILE))?;
+    if plain > 0 {
+        println!(
+            "WARNING: this backup contains {plain} access-key secret(s) in plaintext; protect it like a password store"
+        );
+    }
+    if sealed > 0 {
+        println!(
+            "note: access keys are included, encrypted; restoring them needs the master key, which is NOT in the backup"
+        );
+    }
+    println!(
+        "note: the configuration and the master key file are not included; back them up separately"
+    );
     Ok(())
 }
 
@@ -284,7 +299,46 @@ pub fn read_manifest(source: &Path) -> Result<Manifest> {
     Ok(m)
 }
 
-pub fn restore(source: &Path, data_dir: &Path) -> Result<()> {
+/// (plaintext, encrypted) stored secrets in a database file; (0, 0) for
+/// stores from before access keys moved into the database.
+fn key_scheme_counts(db: &Path) -> Result<(i64, i64)> {
+    let conn =
+        rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    if migrations::applied(&conn)?.iter().all(|(v, _)| *v < 3) {
+        return Ok((0, 0));
+    }
+    queries::secret_scheme_counts(&conn)
+}
+
+/// Check that the backup's access keys can be decrypted before restoring.
+fn check_keys(db: &Path, master_key_file: Option<&Path>, skip: bool) -> Result<()> {
+    let (_, sealed) = key_scheme_counts(db)?;
+    let Some(path) = master_key_file else {
+        if sealed > 0 && !skip {
+            return Err(Error::config(format!(
+                "the backup contains {sealed} encrypted access key secret(s); pass --master-key-file to verify them (or --skip-key-check, then `storlite admin recover --reset-keys`)"
+            )));
+        }
+        return Ok(());
+    };
+    let codec = SecretCodec::encrypted(MasterKey::load(path)?);
+    let conn =
+        rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let meta = queries::load_store_meta(&conn)?;
+    crate::admin::load_credential_set(&conn, &codec, &meta.store_id, now_ms()).map_err(|e| {
+        Error::config(format!(
+            "the master key does not open the backup's access keys: {e}"
+        ))
+    })?;
+    Ok(())
+}
+
+pub fn restore(
+    source: &Path,
+    data_dir: &Path,
+    master_key_file: Option<&Path>,
+    skip_key_check: bool,
+) -> Result<()> {
     metadata::check_sqlite_runtime()?;
     let m = read_manifest(source)?;
     let (db_bytes, db_sha) = hash_file(&source.join(fsutil::DB_FILE))?;
@@ -293,6 +347,11 @@ pub fn restore(source: &Path, data_dir: &Path) -> Result<()> {
             "backup database does not match the manifest",
         ));
     }
+    check_keys(
+        &source.join(fsutil::DB_FILE),
+        master_key_file,
+        skip_key_check,
+    )?;
     // Verify the file list before writing anything.
     let mut h = Sha256::new();
     let mut entries = Vec::new();
@@ -402,6 +461,8 @@ pub fn restore(source: &Path, data_dir: &Path) -> Result<()> {
         data_dir.display(),
         r.reclaimed_writing_blobs
     );
-    println!("note: provision credentials and configuration separately before serving");
+    println!(
+        "note: point the configuration at this data directory and the store's master key before serving"
+    );
     Ok(())
 }

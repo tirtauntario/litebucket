@@ -25,8 +25,7 @@ async fn ops_01_second_owner_is_refused_and_lock_is_kept() {
     let ino = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&lock).unwrap());
     let err = storlite::store::open_offline(&cfg, false).unwrap_err();
     assert!(matches!(err, storlite::error::Error::Locked), "{err}");
-    let creds = storlite::credentials::CredentialSet::load(&cfg.credentials_file, false).unwrap();
-    assert!(Store_open(cfg.clone(), creds).is_err());
+    assert!(storlite::store::Store::open(cfg.clone()).is_err());
     assert!(storlite::doctor::gc(&cfg, true).is_err());
     assert!(
         storlite::store::initialize(&cfg).is_err(),
@@ -34,14 +33,6 @@ async fn ops_01_second_owner_is_refused_and_lock_is_kept() {
     );
     let ino2 = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&lock).unwrap());
     assert_eq!(ino, ino2, "lock file never replaced");
-}
-
-#[allow(non_snake_case)]
-fn Store_open(
-    cfg: storlite::config::Config,
-    creds: storlite::credentials::CredentialSet,
-) -> storlite::error::Result<std::sync::Arc<storlite::store::Store>> {
-    storlite::store::Store::open(cfg, storlite::credentials::CredentialStore::new(creds))
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -183,9 +174,29 @@ async fn ops_05_backup_and_restore_round_trip() {
 
     // Restore into a different empty directory and serve from it.
     let restored = s.dir.path().join("restored");
-    storlite::backup::restore(&backup_dir, &restored).unwrap();
+    let key = s.dir.path().join("master.key");
+    // Encrypted access keys need the master key to be verified.
     assert!(
-        storlite::backup::restore(&backup_dir, &restored).is_err(),
+        storlite::backup::restore(&backup_dir, &s.dir.path().join("nokey"), None, false).is_err()
+    );
+    let other_key = s.dir.path().join("other.key");
+    storlite::secrets::MasterKey::generate(&other_key).unwrap();
+    let err = storlite::backup::restore(
+        &backup_dir,
+        &s.dir.path().join("wrongkey"),
+        Some(&other_key),
+        false,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("master key does not open"), "{err}");
+    assert!(
+        !s.dir.path().join("wrongkey").exists(),
+        "nothing written before the key check"
+    );
+    storlite::backup::restore(&backup_dir, &restored, Some(&key), false).unwrap();
+    assert!(
+        storlite::backup::restore(&backup_dir, &restored, Some(&key), false).is_err(),
         "non-empty target refused"
     );
     let text = std::fs::read_to_string(&s.config_path)
@@ -243,10 +254,26 @@ async fn ops_05_backup_and_restore_round_trip() {
     let mut bytes = std::fs::read(&victim).unwrap();
     bytes[0] ^= 0xff;
     std::fs::write(&victim, bytes).unwrap();
-    assert!(storlite::backup::restore(&backup_dir, &s.dir.path().join("restored2")).is_err());
+    assert!(
+        storlite::backup::restore(
+            &backup_dir,
+            &s.dir.path().join("restored2"),
+            Some(&key),
+            false
+        )
+        .is_err()
+    );
     // An incomplete backup is refused.
     std::fs::remove_file(backup_dir.join("BACKUP_COMPLETE")).unwrap();
-    assert!(storlite::backup::restore(&backup_dir, &s.dir.path().join("restored3")).is_err());
+    assert!(
+        storlite::backup::restore(
+            &backup_dir,
+            &s.dir.path().join("restored3"),
+            Some(&key),
+            false
+        )
+        .is_err()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -271,8 +298,6 @@ async fn doctor_reports_consistency_and_untracked_files() {
         s.data_dir().join("staging/00/11/junk.tmp").exists(),
         "gc never deletes untracked files"
     );
-    storlite::doctor::set_quota(&cfg, "docs", Some(5)).unwrap();
-    assert!(storlite::doctor::set_quota(&cfg, "nobucket", Some(5)).is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -491,8 +516,7 @@ async fn db_04_missing_or_newer_metadata_never_opens_an_empty_store() {
         )
         .unwrap();
     }
-    let creds = storlite::credentials::CredentialSet::load(&cfg.credentials_file, false).unwrap();
-    assert!(Store_open(cfg.clone(), creds).is_err());
+    assert!(storlite::store::Store::open(cfg.clone()).is_err());
     {
         let conn = rusqlite::Connection::open(s.data_dir().join("metadata.sqlite3")).unwrap();
         conn.execute("DELETE FROM schema_migrations WHERE version = 999", [])
@@ -504,8 +528,9 @@ async fn db_04_missing_or_newer_metadata_never_opens_an_empty_store() {
     std::fs::rename(&db, &moved).unwrap();
     let _ = std::fs::remove_file(s.data_dir().join("metadata.sqlite3-wal"));
     let _ = std::fs::remove_file(s.data_dir().join("metadata.sqlite3-shm"));
-    let creds = storlite::credentials::CredentialSet::load(&cfg.credentials_file, false).unwrap();
-    let err = Store_open(cfg.clone(), creds).unwrap_err().to_string();
+    let err = storlite::store::Store::open(cfg.clone())
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("refusing to create an empty store"), "{err}");
     assert!(!db.exists());
     std::fs::rename(&moved, &db).unwrap();

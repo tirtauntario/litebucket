@@ -19,7 +19,7 @@ use tokio_util::task::TaskTracker;
 
 use crate::capacity::{Capacity, Reservation};
 use crate::checksums::{Algorithm, BodyHashes, Digests, StoredChecksum};
-use crate::config::Config;
+use crate::config::{Config, SecretProtection};
 use crate::credentials::CredentialStore;
 use crate::error::{Error, Result};
 use crate::fsutil::{Area, DataDir};
@@ -28,6 +28,7 @@ use crate::locks::KeyedLocks;
 use crate::metadata::queries::{self, BlobArea, BlobFinal, StoreMeta};
 use crate::metadata::{self, Db, Role, migrations, now_ms, with_write_tx};
 use crate::s3::error::{S3Error, S3Result};
+use crate::secrets::{MasterKey, SecretCodec};
 use crate::telemetry::Metrics;
 
 /// A source of decoded body bytes. Returning `Ok(None)` means the stream ended
@@ -51,6 +52,10 @@ pub struct Store {
     integrity_failed: AtomicBool,
     pub metrics: Arc<Metrics>,
     pub credentials: CredentialStore,
+    pub secrets: SecretCodec,
+    /// Serializes admin mutations with their credential-snapshot refresh so a
+    /// slower refresh can never install an older key set.
+    pub admin_lock: tokio::sync::Mutex<()>,
     ready: AtomicBool,
     pub startup: StartupReport,
     gauges: [std::sync::atomic::AtomicU64; 5],
@@ -80,19 +85,83 @@ where
         .map_err(|e| io::Error::other(format!("blocking task failed: {e}")))?
 }
 
-/// Initialize a brand-new store (the explicit `init` flow).
-pub fn initialize(config: &Config) -> Result<StoreMeta> {
+/// Build the secret codec for the configured protection mode. In plaintext
+/// mode an existing master key is still loaded so secrets that were stored
+/// encrypted can be converted.
+pub fn secret_codec(config: &Config) -> Result<SecretCodec> {
+    let key_file = config.secrets.master_key_file.as_deref();
+    match config.secrets.protection {
+        SecretProtection::Encrypted => {
+            let path = key_file.ok_or_else(|| {
+                Error::config("secrets.protection = \"encrypted\" requires secrets.master_key_file")
+            })?;
+            Ok(SecretCodec::encrypted(MasterKey::load(path)?))
+        }
+        SecretProtection::Plaintext => Ok(SecretCodec::plaintext(
+            key_file
+                .filter(|p| p.exists())
+                .map(MasterKey::load)
+                .transpose()?,
+        )),
+    }
+}
+
+/// Result of `init`.
+#[derive(Debug)]
+pub struct InitReport {
+    pub meta: StoreMeta,
+    pub admin: crate::admin::IssuedKey,
+    pub master_key_created: bool,
+}
+
+/// Initialize a brand-new store (the explicit `init` flow): creates the
+/// master key file when encryption is configured and the file is missing,
+/// the data directory and database, and a first admin key.
+pub fn initialize(config: &Config) -> Result<InitReport> {
     metadata::check_sqlite_runtime()?;
+    if let Ok(mut entries) = std::fs::read_dir(&config.data_dir)
+        && entries.next().is_some()
+    {
+        return Err(Error::config(format!(
+            "refusing to initialize non-empty directory {}",
+            config.data_dir.display()
+        )));
+    }
+    let mut master_key_created = false;
+    if config.secrets.protection == SecretProtection::Encrypted
+        && let Some(path) = &config.secrets.master_key_file
+        && !path.exists()
+    {
+        MasterKey::generate(path)?;
+        master_key_created = true;
+    }
+    let codec = secret_codec(config)?;
     let data = DataDir::create(&config.data_dir)?;
     let conn = metadata::create_database(&data.db_path())?;
     migrations::apply(&conn)?;
     let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
-    let meta = queries::init_store_meta(&tx, &config.region, now_ms())?;
+    let now = now_ms();
+    let meta = queries::init_store_meta(&tx, &config.region, now)?;
+    let admin = crate::admin::create_admin_key(
+        &tx,
+        &crate::admin::Ctx {
+            codec: &codec,
+            store_id: &meta.store_id,
+            actor: "init",
+            now_ms: now,
+            max_buckets: config.limits.max_buckets,
+        },
+        None,
+    )?;
     tx.commit()?;
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     drop(conn);
     data.sync_root()?;
-    Ok(meta)
+    Ok(InitReport {
+        meta,
+        admin,
+        master_key_created,
+    })
 }
 
 /// Open a locked data directory and its metadata for offline maintenance or
@@ -145,10 +214,40 @@ pub fn open_offline(
 impl Store {
     /// Open, recover, and start workers. The S3 listener must not be bound
     /// before this succeeds.
-    pub fn open(config: Config, credentials: CredentialStore) -> Result<Arc<Self>> {
+    pub fn open(config: Config) -> Result<Arc<Self>> {
+        let codec = secret_codec(&config)?;
         let (data, conn, meta, applied) = open_offline(&config, true)?;
         let mut conn = conn;
         let recovery = with_write_tx(&mut conn, |tx| queries::recover(tx, now_ms()))?;
+        let store_id = meta.store_id;
+        let converted = metadata::with_named_write_tx(&mut conn, "secret_protection", |tx| {
+            queries::clear_expired_previous_secrets(tx, now_ms())?;
+            crate::admin::convert_secret_protection(tx, &codec, &store_id)
+        })?;
+        if converted > 0 {
+            if codec.encrypts() {
+                tracing::info!(
+                    event = "secrets_protection_changed",
+                    protection = "encrypted",
+                    keys = converted,
+                    "encrypted stored secrets with the master key"
+                );
+            } else {
+                tracing::warn!(
+                    event = "secrets_protection_changed",
+                    protection = "plaintext",
+                    keys = converted,
+                    "stored secrets are now plaintext; backups will contain usable secrets"
+                );
+            }
+        }
+        let set = crate::admin::load_credential_set(&conn, &codec, &store_id, now_ms())?;
+        if set.enabled_count() == 0 {
+            return Err(Error::config(
+                "no enabled access keys; refusing to start an S3 endpoint without authentication (with the server stopped, run `storlite admin recover` to create an admin key)",
+            ));
+        }
+        let credentials = CredentialStore::new(set);
         if recovery.reopened_uploads + recovery.reclaimed_writing_blobs > 0 {
             tracing::warn!(
                 event = "recovery",
@@ -182,6 +281,8 @@ impl Store {
             integrity_failed: AtomicBool::new(false),
             metrics,
             credentials,
+            secrets: codec,
+            admin_lock: tokio::sync::Mutex::new(()),
             ready: AtomicBool::new(false),
             startup: StartupReport {
                 sqlite_version: metadata::sqlite_version(),
@@ -191,6 +292,20 @@ impl Store {
             },
             gauges: Default::default(),
         }))
+    }
+
+    /// Reload the credential snapshot from the database. On failure the
+    /// previous snapshot stays in place.
+    pub async fn refresh_credentials(self: &Arc<Self>) -> Result<()> {
+        let store = self.clone();
+        let set = self
+            .db
+            .read(move |c| {
+                crate::admin::load_credential_set(c, &store.secrets, &store.meta.store_id, now_ms())
+            })
+            .await?;
+        self.credentials.replace(set);
+        Ok(())
     }
 
     /// (garbage blobs, garbage bytes, active multipart uploads), refreshed by maintenance.

@@ -63,7 +63,6 @@ pub struct Metrics {
     pub gc_deleted_bytes: AtomicU64,
     pub multipart_expired: AtomicU64,
     pub multipart_aborted: AtomicU64,
-    pub credential_reload_failures: AtomicU64,
     pub checkpoints: AtomicU64,
     pub wal_bytes: AtomicU64,
 }
@@ -82,7 +81,6 @@ impl Default for Metrics {
             gc_deleted_bytes: AtomicU64::new(0),
             multipart_expired: AtomicU64::new(0),
             multipart_aborted: AtomicU64::new(0),
-            credential_reload_failures: AtomicU64::new(0),
             checkpoints: AtomicU64::new(0),
             wal_bytes: AtomicU64::new(0),
         }
@@ -151,7 +149,7 @@ impl Metrics {
                 "storlite_request_duration_seconds_count{{operation=\"{op}\"}} {count}"
             );
         }
-        let counters: [(&str, &str, &AtomicU64); 11] = [
+        let counters: [(&str, &str, &AtomicU64); 10] = [
             (
                 "storlite_bytes_received_total",
                 "Decoded object bytes received.",
@@ -191,11 +189,6 @@ impl Metrics {
                 "storlite_multipart_aborted_total",
                 "Multipart uploads aborted by clients.",
                 &self.multipart_aborted,
-            ),
-            (
-                "storlite_credential_reload_failures_total",
-                "Rejected credential reloads.",
-                &self.credential_reload_failures,
             ),
             (
                 "storlite_sqlite_checkpoints_total",

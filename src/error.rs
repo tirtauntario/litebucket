@@ -23,6 +23,10 @@ pub enum Error {
     #[error("mutations are halted pending recovery: {0}")]
     Halted(String),
     #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    Conflict(String),
+    #[error("{0}")]
     Other(String),
 }
 

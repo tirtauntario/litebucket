@@ -22,6 +22,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "part_layout",
         sql: include_str!("../../migrations/0002_part_layout.sql"),
     },
+    Migration {
+        version: 3,
+        name: "credentials",
+        sql: include_str!("../../migrations/0003_credentials.sql"),
+    },
 ];
 
 /// On-disk storage format understood by this executable.

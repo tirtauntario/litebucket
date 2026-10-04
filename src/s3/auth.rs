@@ -320,11 +320,10 @@ fn verify(
     };
     let query = sigv4::canonical_query(raw_query, presigned.then_some("X-Amz-Signature"));
     let signed_str = signed_headers.join(";");
-    let key = sigv4::signing_key(credential.secret(), &scope.date, &scope.region, "s3");
     let scope_str = scope.scope();
-    let matched = sigv4::canonical_uri_candidates(&req.raw_path)
+    let strings_to_sign: Vec<String> = sigv4::canonical_uri_candidates(&req.raw_path)
         .iter()
-        .any(|uri| {
+        .map(|uri| {
             let cr = sigv4::canonical_request(
                 req.method.as_str(),
                 uri,
@@ -333,12 +332,19 @@ fn verify(
                 &signed_str,
                 payload_hash,
             );
-            let sts = sigv4::string_to_sign(amz_date, &scope_str, &cr);
-            sigv4::signature_eq(&sigv4::hmac(&key, sts.as_bytes()), signature)
-        });
-    if !matched {
-        return Err(S3Error::signature_does_not_match());
-    }
+            sigv4::string_to_sign(amz_date, &scope_str, &cr)
+        })
+        .collect();
+    // The current secret, or the previous one during a rotation grace period.
+    let key = credential
+        .valid_secrets(p.now_ms)
+        .map(|secret| sigv4::signing_key(secret, &scope.date, &scope.region, "s3"))
+        .find(|key| {
+            strings_to_sign
+                .iter()
+                .any(|sts| sigv4::signature_eq(&sigv4::hmac(key, sts.as_bytes()), signature))
+        })
+        .ok_or_else(S3Error::signature_does_not_match)?;
     Ok(AuthContext {
         credential,
         payload,

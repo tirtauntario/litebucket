@@ -51,7 +51,12 @@ impl Maintenance {
             cancel.clone(),
             Duration::from_secs(60),
             "expiry",
-            |s| Box::pin(async move { expire_once(&s).await.map(|_| ()) }),
+            |s| {
+                Box::pin(async move {
+                    expire_once(&s).await?;
+                    forget_rotated_secrets(&s).await
+                })
+            },
         ));
         tasks.push(spawn_loop(
             store.clone(),
@@ -113,6 +118,29 @@ fn spawn_loop(
             }
         }
     })
+}
+
+/// Drop previous secrets whose rotation grace period ended, so they are no
+/// longer stored. Authentication already ignores them after the deadline.
+async fn forget_rotated_secrets(store: &Arc<Store>) -> Result<()> {
+    // Same ordering guarantee as admin changes: commit and refresh together.
+    let _guard = store.admin_lock.lock().await;
+    let now = now_ms();
+    let n = store
+        .db
+        .write_tx("", move |tx| {
+            queries::clear_expired_previous_secrets(tx, now)
+        })
+        .await?;
+    if n > 0 {
+        tracing::info!(
+            event = "rotated_secrets_forgotten",
+            keys = n,
+            "previous secrets past their grace period removed"
+        );
+        store.refresh_credentials().await?;
+    }
+    Ok(())
 }
 
 /// Reclaim one bounded batch of eligible garbage. Returns blobs reclaimed.

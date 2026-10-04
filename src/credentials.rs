@@ -1,48 +1,16 @@
-//! Operator-managed credential file: parsing, validation, permission model,
-//! atomic reload snapshots, and secret generation.
+//! Access keys: the authorization model, validation, key generation, and the
+//! atomically replaceable in-memory snapshot used on every request.
+//!
+//! Keys are stored in the metadata database (see `metadata::queries` and
+//! `admin`); this module never touches storage.
 
 use std::collections::{BTreeSet, HashMap};
-use std::io::Write;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-use std::path::Path;
 use std::sync::{Arc, RwLock};
 
-use serde::Deserialize;
 use time::OffsetDateTime;
 
 use crate::error::{Error, Result};
 use crate::keys::validate_bucket_name;
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CredentialsFile {
-    #[serde(default)]
-    credentials: Vec<CredentialEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CredentialEntry {
-    id: String,
-    secret_access_key: String,
-    #[serde(default)]
-    enabled: bool,
-    #[serde(default)]
-    expires_at: Option<String>,
-    #[serde(default)]
-    global_grants: Vec<String>,
-    #[serde(default)]
-    grants: Vec<GrantEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GrantEntry {
-    bucket: String,
-    #[serde(default)]
-    prefix: String,
-    actions: Vec<String>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Action {
@@ -54,7 +22,15 @@ pub enum Action {
 }
 
 impl Action {
-    fn parse(s: &str) -> Option<Self> {
+    pub const ALL: [Action; 5] = [
+        Self::Read,
+        Self::List,
+        Self::Write,
+        Self::Delete,
+        Self::ManageBucket,
+    ];
+
+    pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "read" => Self::Read,
             "list" => Self::List,
@@ -63,6 +39,16 @@ impl Action {
             "manage_bucket" => Self::ManageBucket,
             _ => return None,
         })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::List => "list",
+            Self::Write => "write",
+            Self::Delete => "delete",
+            Self::ManageBucket => "manage_bucket",
+        }
     }
 }
 
@@ -74,7 +60,7 @@ pub enum GlobalGrant {
 }
 
 impl GlobalGrant {
-    fn parse(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "admin" => Self::Admin,
             "list_buckets" => Self::ListBuckets,
@@ -82,13 +68,81 @@ impl GlobalGrant {
             _ => return None,
         })
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::ListBuckets => "list_buckets",
+            Self::CreateBucket => "create_bucket",
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grant {
     pub bucket: String,
     pub prefix: Vec<u8>,
     pub actions: BTreeSet<Action>,
+}
+
+impl Grant {
+    /// Validate a grant: bucket name rules, prefix length, at least one
+    /// action, and `manage_bucket` only on the whole bucket.
+    pub fn validate(&self) -> Result<()> {
+        validate_bucket_name(&self.bucket)
+            .map_err(|e| Error::config(format!("grant bucket {}: {e}", self.bucket)))?;
+        if self.prefix.len() > crate::keys::MAX_KEY_BYTES {
+            return Err(Error::config("grant prefix is longer than 1024 bytes"));
+        }
+        if self.actions.is_empty() {
+            return Err(Error::config("a grant needs at least one action"));
+        }
+        if self.actions.contains(&Action::ManageBucket) && !self.prefix.is_empty() {
+            return Err(Error::config(
+                "manage_bucket requires an empty (whole-bucket) prefix",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Parse `bucket[/prefix]:action[,action...]`. Bucket names cannot
+    /// contain `/` and actions cannot contain `:`, so splitting at the first
+    /// `/` and the last `:` is unambiguous (a prefix may contain `:`).
+    pub fn parse_spec(spec: &str) -> Result<Self> {
+        let (target, actions) = spec.rsplit_once(':').ok_or_else(|| {
+            Error::config(format!(
+                "invalid grant {spec:?}; expected bucket[/prefix]:action[,action...]"
+            ))
+        })?;
+        let (bucket, prefix) = split_target(target);
+        let mut set = BTreeSet::new();
+        for a in actions.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+            set.insert(Action::parse(a).ok_or_else(|| {
+                Error::config(format!(
+                    "unknown action {a:?} (expected read, list, write, delete, manage_bucket)"
+                ))
+            })?);
+        }
+        let g = Grant {
+            bucket: bucket.to_string(),
+            prefix: prefix.as_bytes().to_vec(),
+            actions: set,
+        };
+        g.validate()?;
+        Ok(g)
+    }
+
+    pub fn action_names(&self) -> Vec<&'static str> {
+        self.actions.iter().map(|a| a.as_str()).collect()
+    }
+}
+
+/// Split `bucket[/prefix]` at the first `/`.
+pub fn split_target(target: &str) -> (&str, &str) {
+    match target.split_once('/') {
+        Some((b, p)) => (b, p),
+        None => (target, ""),
+    }
 }
 
 /// One enabled credential. The secret is kept in memory because SigV4
@@ -97,6 +151,8 @@ pub struct Grant {
 pub struct Credential {
     pub id: String,
     secret: String,
+    /// Previous secret, accepted until the given time (rotation grace).
+    previous: Option<(String, i64)>,
     pub expires_at_ms: Option<i64>,
     pub global: BTreeSet<GlobalGrant>,
     pub grants: Vec<Grant>,
@@ -114,8 +170,37 @@ impl std::fmt::Debug for Credential {
 }
 
 impl Credential {
+    pub fn new(
+        id: String,
+        secret: String,
+        previous: Option<(String, i64)>,
+        expires_at_ms: Option<i64>,
+        global: BTreeSet<GlobalGrant>,
+        grants: Vec<Grant>,
+    ) -> Self {
+        Self {
+            id,
+            secret,
+            previous,
+            expires_at_ms,
+            global,
+            grants,
+        }
+    }
+
     pub fn secret(&self) -> &str {
         &self.secret
+    }
+
+    /// Secrets that currently authenticate this key: the current one, plus
+    /// the previous one while its rotation grace period lasts.
+    pub fn valid_secrets(&self, now_ms: i64) -> impl Iterator<Item = &str> {
+        std::iter::once(self.secret.as_str()).chain(
+            self.previous
+                .as_ref()
+                .filter(|(_, until)| now_ms < *until)
+                .map(|(s, _)| s.as_str()),
+        )
     }
 
     pub fn is_expired(&self, now_ms: i64) -> bool {
@@ -183,7 +268,7 @@ pub enum BucketScope {
     Denied,
 }
 
-/// Immutable validated credential set.
+/// Immutable set of enabled credentials.
 #[derive(Debug, Default)]
 pub struct CredentialSet {
     by_id: HashMap<String, Arc<Credential>>,
@@ -191,6 +276,16 @@ pub struct CredentialSet {
 }
 
 impl CredentialSet {
+    pub fn new(enabled: Vec<Credential>, disabled_count: usize) -> Self {
+        Self {
+            by_id: enabled
+                .into_iter()
+                .map(|c| (c.id.clone(), Arc::new(c)))
+                .collect(),
+            disabled_count,
+        }
+    }
+
     pub fn get(&self, id: &str) -> Option<Arc<Credential>> {
         self.by_id.get(id).cloned()
     }
@@ -204,161 +299,10 @@ impl CredentialSet {
         v.sort();
         v
     }
-
-    /// Load from a file, enforcing owner-only permissions.
-    pub fn load(path: &Path, allow_group_read: bool) -> Result<Self> {
-        let meta = std::fs::symlink_metadata(path).map_err(|e| {
-            Error::config(format!(
-                "cannot stat credentials file {}: {e}",
-                path.display()
-            ))
-        })?;
-        let meta = if meta.file_type().is_symlink() {
-            // Secret mounts commonly use symlinks; validate the target.
-            std::fs::metadata(path)
-                .map_err(|e| Error::config(format!("cannot stat credentials file target: {e}")))?
-        } else {
-            meta
-        };
-        if !meta.is_file() {
-            return Err(Error::config("credentials file is not a regular file"));
-        }
-        let mode = meta.mode() & 0o777;
-        let forbidden = if allow_group_read { 0o027 } else { 0o077 };
-        if mode & forbidden != 0 {
-            return Err(Error::config(format!(
-                "credentials file permissions {mode:o} are too broad; use mode 0600"
-            )));
-        }
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| Error::config(format!("cannot read credentials file: {e}")))?;
-        Self::parse(&text)
-    }
-
-    pub fn parse(text: &str) -> Result<Self> {
-        let file: CredentialsFile = toml::from_str(text).map_err(|e| {
-            // toml errors can quote source lines; never echo secret material.
-            Error::config(format!(
-                "invalid credentials file at {}",
-                e.span()
-                    .map(|s| format!("byte {}", s.start))
-                    .unwrap_or_default()
-            ))
-        })?;
-        let mut set = CredentialSet::default();
-        let mut seen = BTreeSet::new();
-        for entry in file.credentials {
-            validate_access_key_id(&entry.id)?;
-            if !seen.insert(entry.id.clone()) {
-                return Err(Error::config(format!(
-                    "duplicate credential id {}",
-                    entry.id
-                )));
-            }
-            let mut global = BTreeSet::new();
-            for g in &entry.global_grants {
-                global.insert(GlobalGrant::parse(g).ok_or_else(|| {
-                    Error::config(format!("credential {}: unknown global grant {g}", entry.id))
-                })?);
-            }
-            let mut grants = Vec::new();
-            for g in entry.grants {
-                validate_bucket_name(&g.bucket).map_err(|e| {
-                    Error::config(format!(
-                        "credential {}: grant bucket {}: {e}",
-                        entry.id, g.bucket
-                    ))
-                })?;
-                if g.prefix.len() > crate::keys::MAX_KEY_BYTES {
-                    return Err(Error::config(format!(
-                        "credential {}: grant prefix too long",
-                        entry.id
-                    )));
-                }
-                if g.actions.is_empty() {
-                    return Err(Error::config(format!(
-                        "credential {}: grant has no actions",
-                        entry.id
-                    )));
-                }
-                let mut actions = BTreeSet::new();
-                for a in &g.actions {
-                    actions.insert(Action::parse(a).ok_or_else(|| {
-                        Error::config(format!("credential {}: unknown action {a}", entry.id))
-                    })?);
-                }
-                if actions.contains(&Action::ManageBucket) && !g.prefix.is_empty() {
-                    return Err(Error::config(format!(
-                        "credential {}: manage_bucket requires an empty (whole-bucket) prefix",
-                        entry.id
-                    )));
-                }
-                grants.push(Grant {
-                    bucket: g.bucket,
-                    prefix: g.prefix.into_bytes(),
-                    actions,
-                });
-            }
-            let expires_at_ms = match &entry.expires_at {
-                Some(s) => Some(parse_rfc3339_ms(s).ok_or_else(|| {
-                    Error::config(format!("credential {}: invalid expires_at", entry.id))
-                })?),
-                None => None,
-            };
-            if !entry.enabled {
-                set.disabled_count += 1;
-                continue;
-            }
-            validate_secret(&entry.id, &entry.secret_access_key)?;
-            set.by_id.insert(
-                entry.id.clone(),
-                Arc::new(Credential {
-                    id: entry.id,
-                    secret: entry.secret_access_key,
-                    expires_at_ms,
-                    global,
-                    grants,
-                }),
-            );
-        }
-        Ok(set)
-    }
 }
 
-fn parse_rfc3339_ms(s: &str) -> Option<i64> {
-    let t = OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()?;
-    i64::try_from(t.unix_timestamp_nanos() / 1_000_000).ok()
-}
-
-fn validate_access_key_id(id: &str) -> Result<()> {
-    let ok = (3..=128).contains(&id.len())
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
-    if ok {
-        Ok(())
-    } else {
-        Err(Error::config(
-            "credential ids must be 3-128 characters of letters, digits, '-', '_' or '.'",
-        ))
-    }
-}
-
-fn validate_secret(id: &str, secret: &str) -> Result<()> {
-    if secret.starts_with("REPLACE_WITH") {
-        return Err(Error::config(format!(
-            "credential {id} is enabled but still has a placeholder secret"
-        )));
-    }
-    if secret.len() < 32 || secret.len() > 256 || !secret.bytes().all(|b| b.is_ascii_graphic()) {
-        return Err(Error::config(format!(
-            "credential {id}: secret must be 32-256 printable ASCII characters (use `storlite credentials generate`)"
-        )));
-    }
-    Ok(())
-}
-
-/// Shared, atomically replaceable credential snapshot.
+/// Shared, atomically replaceable credential snapshot. Requests take a
+/// snapshot once; a replacement applies to every later request.
 #[derive(Debug, Clone)]
 pub struct CredentialStore {
     inner: Arc<RwLock<Arc<CredentialSet>>>,
@@ -380,99 +324,102 @@ impl CredentialStore {
     }
 }
 
-/// Write a new disabled credential fragment with a 256-bit secret to an
-/// exclusively created mode-0600 file. The secret is never printed.
-/// Write a new credential with a fresh secret to an exclusively created
-/// mode-0600 file. By default the credential is disabled and has no grants;
-/// `enabled` and `global_grants` let an operator create a directly usable
-/// file (for example a first admin key). The secret is never printed.
-pub fn generate(id: &str, output: &Path, enabled: bool, global_grants: &[String]) -> Result<()> {
-    validate_access_key_id(id)?;
-    for g in global_grants {
-        if GlobalGrant::parse(g).is_none() {
-            return Err(Error::config(format!(
-                "unknown global grant {g:?} (expected admin, list_buckets, or create_bucket)"
-            )));
-        }
-    }
-    use base64::Engine;
-    let secret =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(crate::ids::random_bytes::<32>());
-    let header = if enabled {
-        "# Generated by `storlite credentials generate`. Keep the file mode 0600.\n"
+pub fn parse_rfc3339_ms(s: &str) -> Option<i64> {
+    let t = OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()?;
+    i64::try_from(t.unix_timestamp_nanos() / 1_000_000).ok()
+}
+
+pub fn format_rfc3339_ms(ms: i64) -> String {
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
+        .ok()
+        .and_then(|t| {
+            t.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_default()
+}
+
+pub fn validate_access_key_id(id: &str) -> Result<()> {
+    let ok = (3..=128).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
+    if ok {
+        Ok(())
     } else {
-        "# Generated by `storlite credentials generate`. Merge into the credentials file,\n\
-         # add grants, set enabled = true, and keep the file mode 0600.\n"
-    };
-    let grants = global_grants
-        .iter()
-        .map(|g| format!("\"{g}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let text = format!(
-        "{header}\
-         [[credentials]]\n\
-         id = \"{id}\"\n\
-         secret_access_key = \"{secret}\"\n\
-         enabled = {enabled}\n\
-         global_grants = [{grants}]\n"
-    );
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-        .open(output)
-        .map_err(|e| Error::config(format!("cannot create {}: {e}", output.display())))?;
-    f.write_all(text.as_bytes())?;
-    f.sync_all()?;
+        Err(Error::config(
+            "access key ids must be 3-128 characters of letters, digits, '-', '_' or '.'",
+        ))
+    }
+}
+
+pub fn validate_secret(secret: &str) -> Result<()> {
+    if secret.len() < 32 || secret.len() > 256 || !secret.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(Error::config(
+            "secret access keys must be 32-256 printable ASCII characters",
+        ));
+    }
     Ok(())
+}
+
+pub fn validate_description(d: &str) -> Result<()> {
+    if d.len() > 256 || d.chars().any(char::is_control) {
+        return Err(Error::config(
+            "descriptions must be at most 256 bytes without control characters",
+        ));
+    }
+    Ok(())
+}
+
+const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+/// A new access key id: `SL` + 18 base32 characters (90 random bits). Access
+/// key ids are identifiers, not secrets; the format resembles AWS key ids so
+/// tools that pattern-match them behave.
+pub fn generate_access_key_id() -> String {
+    let bytes = crate::ids::random_bytes::<18>();
+    let mut id = String::with_capacity(20);
+    id.push_str("SL");
+    for b in bytes {
+        id.push(BASE32[usize::from(b & 31)] as char);
+    }
+    id
+}
+
+/// A new secret access key: 256 bits from the OS CSPRNG, base64url (43 chars).
+pub fn generate_secret() -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(crate::ids::random_bytes::<32>())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const EXAMPLE: &str = include_str!("../docs/examples/credentials.example.toml");
-
-    #[test]
-    fn example_file_has_no_usable_credentials() {
-        let set = CredentialSet::parse(EXAMPLE).unwrap();
-        assert_eq!(set.enabled_count(), 0);
-        assert_eq!(set.disabled_count, 3);
-    }
-
-    #[test]
-    fn enabled_placeholder_is_rejected() {
-        let text = EXAMPLE.replacen("enabled = false", "enabled = true", 1);
-        assert!(CredentialSet::parse(&text).is_err());
-    }
-
-    fn sample() -> CredentialSet {
-        CredentialSet::parse(
-            r#"
-[[credentials]]
-id = "reader"
-secret_access_key = "0123456789abcdef0123456789abcdef"
-enabled = true
-[[credentials.grants]]
-bucket = "documents"
-prefix = "customers/123/"
-actions = ["read", "list"]
-
-[[credentials]]
-id = "admin-key"
-secret_access_key = "0123456789abcdef0123456789abcdeX"
-enabled = true
-global_grants = ["admin"]
-"#,
+    fn cred(id: &str, global: &[GlobalGrant], grants: Vec<Grant>) -> Credential {
+        Credential::new(
+            id.into(),
+            generate_secret(),
+            None,
+            None,
+            global.iter().copied().collect(),
+            grants,
         )
-        .unwrap()
     }
 
     #[test]
     fn prefix_scoped_permissions() {
-        let set = sample();
+        let set = CredentialSet::new(
+            vec![
+                cred(
+                    "reader",
+                    &[],
+                    vec![Grant::parse_spec("documents/customers/123/:read,list").unwrap()],
+                ),
+                cred("admin-key", &[GlobalGrant::Admin], vec![]),
+            ],
+            0,
+        );
         let r = set.get("reader").unwrap();
         assert!(r.allows_object("documents", b"customers/123/a.pdf", Action::Read));
         assert!(!r.allows_object("documents", b"customers/1234/a.pdf", Action::Read));
@@ -493,56 +440,51 @@ global_grants = ["admin"]
     }
 
     #[test]
-    fn manage_bucket_requires_whole_bucket_prefix() {
-        let text = r#"
-[[credentials]]
-id = "m"
-secret_access_key = "0123456789abcdef0123456789abcdef"
-enabled = true
-[[credentials.grants]]
-bucket = "documents"
-prefix = "x/"
-actions = ["manage_bucket"]
-"#;
-        assert!(CredentialSet::parse(text).is_err());
+    fn grant_specs() {
+        let g = Grant::parse_spec("docs:read,write").unwrap();
+        assert_eq!((g.bucket.as_str(), g.prefix.as_slice()), ("docs", &b""[..]));
+        assert_eq!(g.action_names(), ["read", "write"]);
+        let g = Grant::parse_spec("docs/a:b/c:list").unwrap();
+        assert_eq!(g.prefix, b"a:b/c");
+        assert!(Grant::parse_spec("docs/x/:manage_bucket").is_err());
+        assert!(Grant::parse_spec("docs:manage_bucket").is_ok());
+        assert!(Grant::parse_spec("docs:fly").is_err());
+        assert!(Grant::parse_spec("docs:").is_err());
+        assert!(Grant::parse_spec("Bad_Bucket:read").is_err());
+        assert!(Grant::parse_spec("docs").is_err());
     }
 
     #[test]
-    fn parse_errors_do_not_echo_secrets() {
-        let text =
-            "[[credentials]]\nid = \"abc\"\nsecret_access_key = \"SUPERSECRETVALUE\"\nbogus = 1\n";
-        let err = CredentialSet::parse(text).unwrap_err().to_string();
-        assert!(!err.contains("SUPERSECRETVALUE"), "{err}");
+    fn generated_keys() {
+        let id = generate_access_key_id();
+        assert_eq!(id.len(), 20);
+        assert!(id.starts_with("SL"));
+        assert!(id.bytes().skip(2).all(|b| BASE32.contains(&b)));
+        validate_access_key_id(&id).unwrap();
+        assert_ne!(id, generate_access_key_id());
+        let s = generate_secret();
+        assert_eq!(s.len(), 43);
+        validate_secret(&s).unwrap();
+        assert_ne!(s, generate_secret());
     }
 
     #[test]
-    fn generate_creates_exclusive_private_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let out = dir.path().join("k.toml");
-        generate("app-key", &out, false, &[]).unwrap();
-        let meta = std::fs::metadata(&out).unwrap();
-        assert_eq!(meta.mode() & 0o777, 0o600);
-        assert!(
-            generate("app-key", &out, false, &[]).is_err(),
-            "must not overwrite"
+    fn rotation_grace_accepts_previous_secret_until_deadline() {
+        let c = Credential::new(
+            "k".into(),
+            "new".into(),
+            Some(("old".into(), 1000)),
+            None,
+            BTreeSet::new(),
+            vec![],
         );
-        let text = std::fs::read_to_string(&out)
-            .unwrap()
-            .replace("enabled = false", "enabled = true");
-        let set = CredentialSet::parse(&text).unwrap();
-        assert_eq!(set.get("app-key").unwrap().secret().len(), 43);
+        assert_eq!(c.valid_secrets(999).collect::<Vec<_>>(), ["new", "old"]);
+        assert_eq!(c.valid_secrets(1000).collect::<Vec<_>>(), ["new"]);
     }
 
     #[test]
-    fn generate_enabled_admin_is_directly_usable() {
-        let dir = tempfile::tempdir().unwrap();
-        let out = dir.path().join("credentials.toml");
-        generate("admin", &out, true, &["admin".to_string()]).unwrap();
-        let set = CredentialSet::load(&out, false).unwrap();
-        assert_eq!(set.enabled_count(), 1);
-        assert!(set.get("admin").unwrap().is_admin());
-        let bad = dir.path().join("bad.toml");
-        assert!(generate("x1", &bad, true, &["root".to_string()]).is_err());
-        assert!(!bad.exists());
+    fn timestamps_round_trip() {
+        let ms = parse_rfc3339_ms("2027-01-01T00:00:00Z").unwrap();
+        assert_eq!(format_rfc3339_ms(ms), "2027-01-01T00:00:00Z");
     }
 }

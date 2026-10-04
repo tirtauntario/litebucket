@@ -683,26 +683,40 @@ async fn http_02_cors_preflight_and_actual_requests() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn auth_03_credential_reload_is_atomic() {
+async fn auth_03_key_changes_apply_to_the_next_request() {
     let (s, c) = setup().await;
-    let store = s.store();
-    let creds = s.dir.path().join("credentials.toml");
-    // Invalid file: last good configuration stays.
-    std::fs::write(&creds, "[[credentials]]\nid = \"x\"\n").unwrap();
-    storlite::cli::reload_credentials(&store, &creds, false);
     assert_eq!(c.put("/docs/k", b"x").await.status, 200);
-    // Valid file without the admin key: admin is revoked immediately.
-    std::fs::write(
-        &creds,
-        CREDENTIALS.replacen("id = \"admin-key\"\nsecret_access_key = \"adminsecretadminsecretadminsecret01\"\nenabled = true", "id = \"admin-key\"\nsecret_access_key = \"adminsecretadminsecretadminsecret01\"\nenabled = false", 1),
-    )
-    .unwrap();
-    storlite::cli::reload_credentials(&store, &creds, false);
-    assert_eq!(c.get("/docs/k", "").await.code(), "InvalidAccessKeyId");
-    // A presigned URL from the disabled key no longer works.
     let url = c.presign("GET", "/docs/k", 600, None);
+    // A rejected change keeps the previous key set.
+    let err = s
+        .admin_api(
+            "PATCH",
+            "/v1/keys/admin-key",
+            serde_json::json!({"expires_at": "soon"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.contains("invalid expires_at"), "{err}");
+    assert_eq!(c.get("/docs/k", "").await.status, 200);
+    // Disabling revokes the key, including its presigned URLs, immediately.
+    s.admin_api(
+        "PATCH",
+        "/v1/keys/admin-key",
+        serde_json::json!({"enabled": false}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(c.get("/docs/k", "").await.code(), "InvalidAccessKeyId");
     assert_eq!(raw("GET", &url, &[], vec![]).await.status, 403);
     assert_eq!(s.client(APP).get("/docs/k", "").await.status, 200);
+    s.admin_api(
+        "PATCH",
+        "/v1/keys/admin-key",
+        serde_json::json!({"enabled": true}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(c.get("/docs/k", "").await.status, 200);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -128,6 +128,51 @@ pub fn parse_config(body: &[u8]) -> S3Result<Vec<CorsRule>> {
     Ok(rules)
 }
 
+/// Validate rules that did not come from S3 XML (the admin API's JSON form)
+/// with the same limits `PutBucketCors` enforces.
+pub fn validate_rules(rules: &[CorsRule]) -> std::result::Result<(), String> {
+    if rules.is_empty() || rules.len() > MAX_RULES {
+        return Err(format!("CORS needs 1 to {MAX_RULES} rules"));
+    }
+    for r in rules {
+        if r.id.as_ref().is_some_and(|id| id.len() > 255) {
+            return Err("CORS rule id is longer than 255 characters".into());
+        }
+        if r.allowed_origins.is_empty() || r.allowed_methods.is_empty() {
+            return Err("each CORS rule needs allowed_origins and allowed_methods".into());
+        }
+        if let Some(o) = r.allowed_origins.iter().find(|o| !wildcard_ok(o)) {
+            return Err(format!(
+                "allowed origin {o:?} is empty or has more than one '*'"
+            ));
+        }
+        if let Some(m) = r
+            .allowed_methods
+            .iter()
+            .find(|m| !METHODS.contains(&m.as_str()))
+        {
+            return Err(format!(
+                "allowed method {m:?} is not one of GET, PUT, POST, DELETE, HEAD"
+            ));
+        }
+        if let Some(h) = r.allowed_headers.iter().find(|h| !wildcard_ok(h)) {
+            return Err(format!(
+                "allowed header {h:?} is empty or has more than one '*'"
+            ));
+        }
+        if let Some(h) = r.expose_headers.iter().find(|h| {
+            h.contains('*') || h.is_empty() || http::HeaderName::from_bytes(h.as_bytes()).is_err()
+        }) {
+            return Err(format!("expose header {h:?} is invalid or has a wildcard"));
+        }
+    }
+    Ok(())
+}
+
+pub fn load_rules(json: Option<&str>) -> Option<Vec<CorsRule>> {
+    load(json)
+}
+
 fn require_manage(cx: &Cx) -> S3Result<()> {
     if cx
         .auth

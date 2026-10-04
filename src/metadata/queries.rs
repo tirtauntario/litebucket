@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::checksums::{Algorithm, ChecksumType, StoredChecksum};
 use crate::error::{Error, Result};
 use crate::ids::{BucketId, GenerationId, StorageId, StoreId, random_bytes};
+use crate::secrets::Sealed;
 
 // ---------------------------------------------------------------------------
 // Row types
@@ -1323,6 +1324,374 @@ pub fn referenced_blobs(conn: &Connection) -> Result<Vec<ReferencedBlob>> {
 /// Whether a storage ID is tracked at all (any state).
 pub fn blob_exists(conn: &Connection, id: &StorageId) -> Result<bool> {
     Ok(blob_state(conn, id)?.is_some())
+}
+
+// ---------------------------------------------------------------------------
+// Access keys, grants, and the admin audit log
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantRow {
+    pub bucket: String,
+    pub prefix: Vec<u8>,
+    pub actions: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CredentialRow {
+    pub id: String,
+    pub secret: Sealed,
+    /// Previous secret and the time it stops being accepted.
+    pub previous: Option<(Sealed, i64)>,
+    pub enabled: bool,
+    pub description: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub expires_at_ms: Option<i64>,
+    pub global: Vec<String>,
+    pub grants: Vec<GrantRow>,
+}
+
+const CREDENTIAL_COLS: &str = "access_key_id, secret_scheme, secret_nonce, secret_value, \
+     previous_scheme, previous_nonce, previous_value, previous_expires_at_ms, \
+     enabled, description, created_at_ms, updated_at_ms, expires_at_ms";
+
+fn credential_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CredentialRow> {
+    let previous = match (
+        r.get::<_, Option<i64>>(4)?,
+        r.get::<_, Option<Vec<u8>>>(6)?,
+        r.get::<_, Option<i64>>(7)?,
+    ) {
+        (Some(scheme), Some(value), Some(until)) => Some((
+            Sealed {
+                scheme,
+                nonce: r.get(5)?,
+                value,
+            },
+            until,
+        )),
+        _ => None,
+    };
+    Ok(CredentialRow {
+        id: r.get(0)?,
+        secret: Sealed {
+            scheme: r.get(1)?,
+            nonce: r.get(2)?,
+            value: r.get(3)?,
+        },
+        previous,
+        enabled: r.get::<_, i64>(8)? != 0,
+        description: r.get(9)?,
+        created_at_ms: r.get(10)?,
+        updated_at_ms: r.get(11)?,
+        expires_at_ms: r.get(12)?,
+        global: Vec::new(),
+        grants: Vec::new(),
+    })
+}
+
+/// Every access key with its grants, ordered by id.
+pub fn load_credentials(conn: &Connection) -> Result<Vec<CredentialRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CREDENTIAL_COLS} FROM credentials ORDER BY access_key_id"
+    ))?;
+    let mut rows: BTreeMap<String, CredentialRow> = stmt
+        .query_map([], credential_row)?
+        .map(|r| r.map(|c| (c.id.clone(), c)))
+        .collect::<Result<_, _>>()?;
+    let mut stmt = conn.prepare(
+        "SELECT access_key_id, grant_name FROM credential_global_grants ORDER BY access_key_id, grant_name",
+    )?;
+    for g in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (id, name) = g?;
+        if let Some(c) = rows.get_mut(&id) {
+            c.global.push(name);
+        }
+    }
+    let mut stmt = conn.prepare(
+        "SELECT access_key_id, bucket, prefix, actions_json FROM credential_grants ORDER BY access_key_id, bucket, prefix",
+    )?;
+    for g in stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, Vec<u8>>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })? {
+        let (id, bucket, prefix, actions) = g?;
+        if let Some(c) = rows.get_mut(&id) {
+            c.grants.push(GrantRow {
+                bucket,
+                prefix,
+                actions: json_or_default(&actions),
+            });
+        }
+    }
+    Ok(rows.into_values().collect())
+}
+
+pub fn load_credential(conn: &Connection, id: &str) -> Result<Option<CredentialRow>> {
+    Ok(load_credentials(conn)?.into_iter().find(|c| c.id == id))
+}
+
+pub fn credential_exists(conn: &Connection, id: &str) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM credentials WHERE access_key_id = ?1",
+            [id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+pub struct NewCredential<'a> {
+    pub id: &'a str,
+    pub secret: &'a Sealed,
+    pub enabled: bool,
+    pub description: &'a str,
+    pub expires_at_ms: Option<i64>,
+    pub global: &'a [&'a str],
+    pub grants: &'a [GrantRow],
+    pub now_ms: i64,
+}
+
+pub fn insert_credential(conn: &Connection, c: &NewCredential<'_>) -> Result<()> {
+    conn.execute(
+        "INSERT INTO credentials(access_key_id, secret_scheme, secret_nonce, secret_value, enabled, description, created_at_ms, updated_at_ms, expires_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
+        params![
+            c.id,
+            c.secret.scheme,
+            c.secret.nonce,
+            c.secret.value,
+            i64::from(c.enabled),
+            c.description,
+            c.now_ms,
+            c.expires_at_ms
+        ],
+    )?;
+    for g in c.global {
+        add_global_grant(conn, c.id, g)?;
+    }
+    for g in c.grants {
+        upsert_grant(conn, c.id, g)?;
+    }
+    Ok(())
+}
+
+fn touch_credential(conn: &Connection, id: &str, now_ms: i64) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE credentials SET updated_at_ms = ?2 WHERE access_key_id = ?1",
+        params![id, now_ms],
+    )? == 1)
+}
+
+pub fn set_credential_enabled(
+    conn: &Connection,
+    id: &str,
+    enabled: bool,
+    now_ms: i64,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE credentials SET enabled = ?2, updated_at_ms = ?3 WHERE access_key_id = ?1",
+        params![id, i64::from(enabled), now_ms],
+    )? == 1)
+}
+
+pub fn set_credential_description(
+    conn: &Connection,
+    id: &str,
+    d: &str,
+    now_ms: i64,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE credentials SET description = ?2, updated_at_ms = ?3 WHERE access_key_id = ?1",
+        params![id, d, now_ms],
+    )? == 1)
+}
+
+pub fn set_credential_expiry(
+    conn: &Connection,
+    id: &str,
+    expires: Option<i64>,
+    now_ms: i64,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE credentials SET expires_at_ms = ?2, updated_at_ms = ?3 WHERE access_key_id = ?1",
+        params![id, expires, now_ms],
+    )? == 1)
+}
+
+pub fn delete_credential(conn: &Connection, id: &str) -> Result<bool> {
+    Ok(conn.execute("DELETE FROM credentials WHERE access_key_id = ?1", [id])? == 1)
+}
+
+pub fn delete_all_credentials(conn: &Connection) -> Result<usize> {
+    Ok(conn.execute("DELETE FROM credentials", [])?)
+}
+
+/// Replace the secret; keep `previous` (if any) valid until its deadline.
+pub fn rotate_credential(
+    conn: &Connection,
+    id: &str,
+    new: &Sealed,
+    previous: Option<(&Sealed, i64)>,
+    now_ms: i64,
+) -> Result<bool> {
+    let (ps, pn, pv, pe) = match previous {
+        Some((s, until)) => (
+            Some(s.scheme),
+            s.nonce.clone(),
+            Some(s.value.clone()),
+            Some(until),
+        ),
+        None => (None, None, None, None),
+    };
+    Ok(conn.execute(
+        "UPDATE credentials SET secret_scheme = ?2, secret_nonce = ?3, secret_value = ?4,
+             previous_scheme = ?5, previous_nonce = ?6, previous_value = ?7, previous_expires_at_ms = ?8,
+             updated_at_ms = ?9
+         WHERE access_key_id = ?1",
+        params![id, new.scheme, new.nonce, new.value, ps, pn, pv, pe, now_ms],
+    )? == 1)
+}
+
+/// Rewrite stored secrets in another encoding (protection mode change).
+pub fn reencode_credential(
+    conn: &Connection,
+    id: &str,
+    secret: &Sealed,
+    previous: Option<&Sealed>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE credentials SET secret_scheme = ?2, secret_nonce = ?3, secret_value = ?4 WHERE access_key_id = ?1",
+        params![id, secret.scheme, secret.nonce, secret.value],
+    )?;
+    if let Some(p) = previous {
+        conn.execute(
+            "UPDATE credentials SET previous_scheme = ?2, previous_nonce = ?3, previous_value = ?4 WHERE access_key_id = ?1",
+            params![id, p.scheme, p.nonce, p.value],
+        )?;
+    }
+    Ok(())
+}
+
+/// Forget previous secrets whose rotation grace period has ended.
+pub fn clear_expired_previous_secrets(conn: &Connection, now_ms: i64) -> Result<usize> {
+    Ok(conn.execute(
+        "UPDATE credentials SET previous_scheme = NULL, previous_nonce = NULL, previous_value = NULL, previous_expires_at_ms = NULL
+         WHERE previous_expires_at_ms IS NOT NULL AND previous_expires_at_ms <= ?1",
+        [now_ms],
+    )?)
+}
+
+/// Insert or replace the grant for (key, bucket, prefix).
+pub fn upsert_grant(conn: &Connection, id: &str, g: &GrantRow) -> Result<()> {
+    let actions = serde_json::to_string(&g.actions).map_err(|e| Error::other(e.to_string()))?;
+    conn.execute(
+        "INSERT INTO credential_grants(access_key_id, bucket, prefix, actions_json) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(access_key_id, bucket, prefix) DO UPDATE SET actions_json = excluded.actions_json",
+        params![id, g.bucket, g.prefix, actions],
+    )?;
+    Ok(())
+}
+
+pub fn remove_grant(conn: &Connection, id: &str, bucket: &str, prefix: &[u8]) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM credential_grants WHERE access_key_id = ?1 AND bucket = ?2 AND prefix = ?3",
+        params![id, bucket, prefix],
+    )? == 1)
+}
+
+pub fn add_global_grant(conn: &Connection, id: &str, name: &str) -> Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO credential_global_grants(access_key_id, grant_name) VALUES (?1, ?2)",
+        params![id, name],
+    )?;
+    Ok(())
+}
+
+pub fn remove_global_grant(conn: &Connection, id: &str, name: &str) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM credential_global_grants WHERE access_key_id = ?1 AND grant_name = ?2",
+        params![id, name],
+    )? == 1)
+}
+
+/// Mark a key as changed (after grant edits).
+pub fn credential_touched(conn: &Connection, id: &str, now_ms: i64) -> Result<bool> {
+    touch_credential(conn, id, now_ms)
+}
+
+/// Enabled, unexpired keys holding the global admin grant.
+pub fn usable_admin_count(conn: &Connection, now_ms: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM credentials c JOIN credential_global_grants g
+           ON g.access_key_id = c.access_key_id AND g.grant_name = 'admin'
+         WHERE c.enabled = 1 AND (c.expires_at_ms IS NULL OR c.expires_at_ms > ?1)",
+        [now_ms],
+        |r| r.get(0),
+    )?)
+}
+
+/// (stored with scheme 0, stored with scheme 1) counts, current and previous secrets.
+pub fn secret_scheme_counts(conn: &Connection) -> Result<(i64, i64)> {
+    Ok(conn.query_row(
+        "SELECT
+           (SELECT count(*) FROM credentials WHERE secret_scheme = 0)
+             + (SELECT count(*) FROM credentials WHERE previous_scheme = 0),
+           (SELECT count(*) FROM credentials WHERE secret_scheme = 1)
+             + (SELECT count(*) FROM credentials WHERE previous_scheme = 1)",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditRow {
+    pub id: i64,
+    pub at_ms: i64,
+    pub actor: String,
+    pub action: String,
+    pub target: String,
+    pub detail: serde_json::Value,
+}
+
+pub fn insert_audit(
+    conn: &Connection,
+    at_ms: i64,
+    actor: &str,
+    action: &str,
+    target: &str,
+    detail: &serde_json::Value,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO admin_audit(at_ms, actor, action, target, detail_json) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![at_ms, actor, action, target, detail.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Most recent audit entries first.
+pub fn list_audit(conn: &Connection, limit: usize) -> Result<Vec<AuditRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, at_ms, actor, action, target, detail_json FROM admin_audit ORDER BY id DESC LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map([limit as i64], |r| {
+            Ok(AuditRow {
+                id: r.get(0)?,
+                at_ms: r.get(1)?,
+                actor: r.get(2)?,
+                action: r.get(3)?,
+                target: r.get(4)?,
+                detail: serde_json::from_str(&r.get::<_, String>(5)?)
+                    .unwrap_or(serde_json::Value::Null),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 #[cfg(test)]

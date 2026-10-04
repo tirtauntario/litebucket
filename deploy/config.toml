@@ -13,15 +13,25 @@
 # Inside the container. /data is the named volume; secrets are mounted
 # read-only from ./secrets/ by compose.yaml. Leave these paths as they are.
 data_dir = "/data"
-credentials_file = "/run/secrets/storlite-credentials.toml"
 
 # Region that clients must sign requests for. Fixed when the store is
 # initialized; startup refuses a different value later.
 region = "us-east-1"
 
-# Accept a credentials file that is group-readable (0640), for orchestrators
-# that mount secrets with a dedicated group. World-readable is always refused.
-# credentials_allow_group_read = false
+[secrets]
+# Access keys live in the metadata database. "encrypted" seals each secret
+# with AES-256-GCM under the master key file; "plaintext" relies on file
+# permissions only (every backup then contains usable secrets). Changing the
+# mode converts all stored secrets at the next start; switching to plaintext
+# needs the master key one last time.
+# protection = "encrypted"
+master_key_file = "/run/secrets/storlite-master.key"
+
+[admin]
+# Local admin API used by `storlite admin ...` (run it with
+# `docker compose exec storlite storlite admin ...`). Only the server's own
+# user and root may connect. compose.yaml mounts /run/storlite as tmpfs.
+socket = "/run/storlite/admin.sock"
 
 [http]
 # S3 API listener. compose.yaml publishes container port 9000.
