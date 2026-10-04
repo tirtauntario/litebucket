@@ -55,7 +55,8 @@ Credentials live in a separate TOML file (`credentials_file`), mode `0600`,
 owned by the service user. See `docs/examples/credentials.example.toml`.
 
 ```sh
-storlite credentials generate --id app-key --output ./app-key.secret.toml   # 0600, never overwrites
+storlite credentials generate --id admin --enable --global-grant admin --output ./credentials.toml  # first key
+storlite credentials generate --id app-key --output ./app-key.secret.toml   # 0600, disabled, never overwrites
 # merge the [[credentials]] block into credentials.toml, add grants, set enabled = true
 storlite credentials check --file ./credentials.toml
 kill -HUP <pid>          # atomic reload; an invalid file keeps the previous set
@@ -163,19 +164,16 @@ stop → `backup` → install new binary → `doctor` (reports pending migration
 
 ## Container
 
-```sh
-docker build -f deploy/Dockerfile -t storlite:local .
-# put credentials.toml, tls.crt, tls.key under deploy/secrets/
-docker compose -f deploy/compose.yaml run --rm storlite init --config /etc/storlite/config.toml
-docker compose -f deploy/compose.yaml up -d
-```
+Installation, Docker Compose, systemd and TLS setup are covered in
+[installation.md](installation.md). Container specifics:
 
-Secret files must be readable by the container user and not by others:
-on Linux hosts `chown 65532:65532 deploy/secrets/* && chmod 0400
-deploy/secrets/*`. (On Docker Desktop, bind mounts do not carry host
-ownership; load the secrets into a volume owned by 65532 instead.)
-
-The image runs as a non-root user (uid 65532 (distroless `nonroot`)), has a single writable volume
-(`/data`, mode 0700), a read-only root filesystem in the compose example, and
-no build toolchain, SQLite CLI, or database server. The binary links glibc
-dynamically (TLS via rustls/ring; no OpenSSL).
+- Image: `ghcr.io/tirtauntario/storlite` (`linux/amd64`, `linux/arm64`), or
+  build it with `docker build -f deploy/Dockerfile -t storlite:local .`.
+- It runs as non-root uid/gid 65532 (distroless `nonroot`) and has one
+  writable volume (`/data`, mode 0700). The compose example uses a read-only
+  root filesystem. There is no shell, build toolchain, SQLite CLI or database
+  server. The binary links glibc dynamically and uses rustls/ring for TLS
+  (no OpenSSL).
+- Secret files must be readable by the container user and not by others. On
+  Linux hosts, run `chown 65532:65532 secrets/* && chmod 0400 secrets/*`.
+  Docker Desktop maps bind-mount access for you.

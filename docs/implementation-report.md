@@ -102,7 +102,10 @@ Each is recorded where it applies; this list is the single overview.
 8. Credential IDs: 3–128 chars of `[A-Za-z0-9._-]` (no `/`, which would break
    SigV4 scopes). Secrets: 32–256 printable ASCII; `REPLACE_WITH…` placeholders
    are rejected when enabled. `credentials generate` writes a **disabled**
-   fragment with a 256-bit base64url secret.
+   fragment with a 256-bit base64url secret by default; the opt-in `--enable`
+   and `--global-grant` flags produce a directly usable file (e.g. the first
+   admin key) for install docs. The secret is still never printed or accepted
+   as an argument, as the spec requires.
 9. The credentials file must not be group/other-readable (unless
    `credentials_allow_group_read`, which still forbids world access). Symlinks
    (secret mounts) are followed for this check only.

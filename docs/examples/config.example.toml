@@ -1,6 +1,7 @@
-# Proposed configuration contract, not an implemented application's config.
-# Paths are relative to this file. For a local trial, copy into the repository
-# root as config.toml, then create a real protected credentials.toml.
+# storlite configuration example: local trial over loopback HTTP. Settings
+# you omit take built-in defaults; unknown keys are errors.
+# Paths are relative to this file. For a local trial, save it as config.toml
+# next to a protected credentials.toml (see docs/installation.md).
 data_dir = "./data"
 region = "us-east-1"
 credentials_file = "./credentials.toml"

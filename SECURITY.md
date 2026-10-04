@@ -47,8 +47,21 @@
 - No replication or high availability; durability depends on the storage
   device honoring `fsync`.
 
-## Reporting
+## Supported versions
 
-Report suspected vulnerabilities privately to the maintainers rather than in a
-public issue. Include the version (`storlite --version`), configuration
-(without secrets), and reproduction steps.
+Security fixes go into the latest release. Upgrade to the newest version
+before you report an issue, if you can.
+
+## Reporting a vulnerability
+
+Do not open a public issue. Report it privately through
+[GitHub private vulnerability reporting](https://github.com/tirtauntario/storlite/security/advisories/new).
+Include:
+
+- the version (`storlite --version`) and platform;
+- the relevant configuration, **without secrets**;
+- steps to reproduce, and the impact you expect.
+
+You should get an acknowledgement within a few days. Fixes are released with
+a GitHub security advisory that credits the reporter, unless you ask not to
+be credited.

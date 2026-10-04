@@ -34,6 +34,8 @@ scripts/interop.sh [ruby boto3 awscli rails browser]     # real clients; INTEROP
 .interop/venv/bin/python scripts/bench.py                # resource/performance evidence
 ```
 
+Releases: pushing tag `vX.Y.Z` (must equal `Cargo.toml` version) runs `.github/workflows/release.yml` → static musl/macOS binaries on GitHub Releases + multi-arch image on `ghcr.io/tirtauntario/storlite`. User install docs are `README.md` + `docs/installation.md`; maintainer steps in `docs/releasing.md`.
+
 `.interop/` (git-ignored) holds the Python venv (boto3, AWS CLI v2) and the generated Rails app. Test configs pin a small disk reserve because the production default (5% free) can trip on a full dev disk.
 
 ## Architecture
