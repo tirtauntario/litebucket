@@ -104,6 +104,7 @@ pub fn open_offline(
 ) -> Result<(DataDir, rusqlite::Connection, StoreMeta, usize)> {
     metadata::check_sqlite_runtime()?;
     let data = DataDir::open(&config.data_dir)?;
+    data.probe_capabilities()?;
     let db_path = data.db_path();
     if !db_path.exists() {
         return Err(Error::config(format!(

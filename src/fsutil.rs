@@ -399,6 +399,78 @@ impl DataDir {
         })
     }
 
+    /// Verify that the filesystem supports exclusive creation, no-clobber
+    /// rename, and file/directory synchronization, using throwaway names in
+    /// the staging root (never in shard directories). Stale probe files from
+    /// an interrupted run are removed first.
+    pub fn probe_capabilities(&self) -> Result<()> {
+        let staging = self.area_fd(Area::Staging);
+        let root = self.root.join(Area::Staging.dir_name());
+        if let Ok(rd) = std::fs::read_dir(&root) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with(".probe-") {
+                    let _ = rustix::fs::unlinkat(staging, name.as_str(), AtFlags::empty());
+                }
+            }
+        }
+        let base = format!(".probe-{}", hex::encode(crate::ids::random_bytes::<8>()));
+        let (a, b, c) = (
+            base.clone(),
+            format!("{base}-renamed"),
+            format!("{base}-other"),
+        );
+        let unsupported = |what: &str, e: &dyn std::fmt::Display| {
+            Error::config(format!(
+                "data directory filesystem does not support {what}: {e}"
+            ))
+        };
+        let create = |name: &str| {
+            rustix::fs::openat(
+                staging,
+                name,
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::from_raw_mode(0o600),
+            )
+        };
+        let fa = create(&a).map_err(|e| unsupported("exclusive file creation", &e))?;
+        if create(&a).is_ok() {
+            return Err(Error::config("data directory filesystem ignores O_EXCL"));
+        }
+        sync_fd(&fa).map_err(|e| unsupported("file synchronization", &e))?;
+        drop(fa);
+        drop(create(&c).map_err(|e| unsupported("exclusive file creation", &e))?);
+        rustix::fs::renameat_with(
+            staging,
+            a.as_str(),
+            staging,
+            b.as_str(),
+            RenameFlags::NOREPLACE,
+        )
+        .map_err(|e| unsupported("no-clobber rename (renameat2 RENAME_NOREPLACE)", &e))?;
+        match rustix::fs::renameat_with(
+            staging,
+            c.as_str(),
+            staging,
+            b.as_str(),
+            RenameFlags::NOREPLACE,
+        ) {
+            Err(rustix::io::Errno::EXIST) => {}
+            Ok(()) => {
+                return Err(Error::config(
+                    "data directory filesystem replaced a file despite RENAME_NOREPLACE",
+                ));
+            }
+            Err(e) => return Err(unsupported("no-clobber rename", &e)),
+        }
+        sync_dir(staging).map_err(|e| unsupported("directory synchronization", &e))?;
+        for n in [&b, &c] {
+            let _ = rustix::fs::unlinkat(staging, n.as_str(), AtFlags::empty());
+        }
+        sync_dir(staging).map_err(|e| unsupported("directory synchronization", &e))?;
+        Ok(())
+    }
+
     /// Sync the root directory (after database file creation etc.).
     pub fn sync_root(&self) -> io::Result<()> {
         sync_dir(&self.root_fd)
@@ -520,6 +592,18 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(dd.open_read(Area::Objects, &id).is_err());
         assert!(dd.path_exists(Area::Objects, &id).unwrap());
+    }
+
+    #[test]
+    fn capability_probe_passes_and_leaves_nothing() {
+        let (tmp, dd) = new_store();
+        dd.probe_capabilities().unwrap();
+        std::fs::write(tmp.path().join("data/staging/.probe-stale"), b"x").unwrap();
+        dd.probe_capabilities().unwrap();
+        let left: Vec<_> = std::fs::read_dir(tmp.path().join("data/staging"))
+            .unwrap()
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]

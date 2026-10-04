@@ -149,6 +149,7 @@ impl Capacity {
     pub fn reserve(&self, bytes: u64) -> std::result::Result<Reservation, CapacityError> {
         if let Err(e) = self.check(bytes) {
             self.stats.rejected_capacity.fetch_add(1, Ordering::Relaxed);
+            tracing::warn!(event = "admission_rejected", reason = ?e, bytes, "capacity reservation refused");
             return Err(e);
         }
         self.reserved.fetch_add(bytes, Ordering::AcqRel);
