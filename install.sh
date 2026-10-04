@@ -82,4 +82,4 @@ fi
 $sudo install -m 0755 "${work}/${name}/storlite" "${INSTALL_DIR}/storlite"
 
 say "installed $("${INSTALL_DIR}/storlite" --version) to ${INSTALL_DIR}/storlite"
-say "example config, credentials, and systemd unit: https://github.com/${REPO}/tree/${VERSION}"
+say "example config and systemd unit: https://github.com/${REPO}/tree/${VERSION}"

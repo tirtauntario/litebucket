@@ -12,8 +12,11 @@ Type=simple
 User=storlite
 Group=storlite
 ExecStart=/usr/local/bin/storlite serve --config /etc/storlite/config.toml
-# SIGHUP reloads the credentials file atomically.
-ExecReload=/bin/kill -HUP $MAINPID
+# /run/storlite holds the admin API socket (config: [admin] socket =
+# "/run/storlite/admin.sock"). Manage keys with
+#   sudo -u storlite storlite admin --config /etc/storlite/config.toml key list
+RuntimeDirectory=storlite
+RuntimeDirectoryMode=0700
 # SIGTERM drains requests within maintenance.shutdown_grace_seconds (30 s by
 # default); allow a margin before systemd escalates to SIGKILL.
 KillSignal=SIGTERM

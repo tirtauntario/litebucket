@@ -8,8 +8,9 @@
 #   compose.yaml            the service definition
 #   .env                    STORLITE_IMAGE pinned to the exact version, STORLITE_PORT
 #   config.toml             commented server configuration (edit, then restart)
-#   secrets/credentials.toml  an enabled admin access key
+#   secrets/master.key      encrypts the access keys stored in the database
 #   secrets/tls.crt, tls.key  a self-signed certificate, unless you put real ones there first
+#   secrets/admin.env       the first admin access key (AWS_* variables, mode 0600)
 # then initializes the data volume and starts the container. Running it again
 # skips what already exists, so it is safe to re-run after a partial failure.
 #
@@ -84,11 +85,10 @@ fi
 
 [ -d secrets ] || mkdir -m 0700 secrets
 
-if [ ! -f secrets/credentials.toml ]; then
+if [ ! -f secrets/master.key ]; then
   docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd)/secrets:/out" "$IMAGE" \
-    credentials generate --id admin --enable --global-grant admin \
-    --output /out/credentials.toml >/dev/null
-  say "created secrets/credentials.toml (access key id: admin)"
+    master-key generate --output /out/master.key >/dev/null
+  say "created secrets/master.key (back it up: without it the stored access keys cannot be used)"
 fi
 
 if [ ! -f secrets/tls.crt ] && [ ! -f secrets/tls.key ]; then
@@ -114,26 +114,24 @@ elif [ ! -f secrets/tls.crt ] || [ ! -f secrets/tls.key ]; then
   die "secrets/ must contain both tls.crt and tls.key"
 fi
 
-# The container runs as uid 65532 and refuses a credentials file that others
+# The container runs as uid 65532 and refuses a master key file that others
 # can read. Docker Desktop maps bind-mount access itself; on Linux the files
 # must be owned by the container user.
-for f in secrets/credentials.toml secrets/tls.crt secrets/tls.key; do
+for f in secrets/master.key secrets/tls.crt secrets/tls.key; do
   chmod 0400 "$f" 2>/dev/null || true   # fails harmlessly once owned by the container user
 done
-read_secret="cat secrets/credentials.toml"
 if [ "$(uname -s)" = "Linux" ]; then
   sudo=""
   if [ "$(id -u)" -ne 0 ]; then sudo="sudo"; fi
-  for f in secrets/credentials.toml secrets/tls.crt secrets/tls.key; do
+  for f in secrets/master.key secrets/tls.crt secrets/tls.key; do
     if [ "$(stat -c %u "$f")" != "$CONTAINER_UID" ]; then
       say "giving $f to the container user (uid $CONTAINER_UID)"
       $sudo chown "$CONTAINER_UID:$CONTAINER_UID" "$f"
     fi
   done
-  if [ -n "$sudo" ]; then read_secret="sudo cat secrets/credentials.toml"; fi
 fi
 
-if ! out="$(docker compose run --rm storlite config check --config /etc/storlite/config.toml 2>&1)"; then
+if ! out="$(docker compose run --rm -T storlite config check 2>&1)"; then
   printf '%s\n' "$out" | grep -v '^ ' >&2 || true   # drop compose progress lines
   die "config.toml is invalid"
 fi
@@ -144,13 +142,18 @@ PORT="${PORT:-9000}"
 
 if [ "$START" = "0" ]; then
   say "files are ready. Start with:"
-  say "  docker compose run --rm storlite init --config /etc/storlite/config.toml"
+  say "  docker compose run --rm storlite init     # prints the first admin key once"
   say "  docker compose up -d"
   exit 0
 fi
 
-if out="$(docker compose run --rm storlite init --config /etc/storlite/config.toml 2>&1)"; then
-  say "initialized the data volume"
+if out="$(docker compose run --rm -T storlite init 2>&1)"; then
+  key_id="$(printf '%s\n' "$out" | sed -n 's/^access_key_id: *//p' | tail -n1)"
+  key_secret="$(printf '%s\n' "$out" | sed -n 's/^secret_access_key: *//p' | tail -n1)"
+  [ -n "$key_id" ] && [ -n "$key_secret" ] || die "init did not report an admin key"
+  (umask 077 && printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_DEFAULT_REGION=us-east-1\n' \
+    "$key_id" "$key_secret" > secrets/admin.env)
+  say "initialized the data volume; admin key saved to secrets/admin.env"
 else
   case "$out" in
     *"non-empty directory"*) say "data volume already initialized" ;;
@@ -166,20 +169,27 @@ until [ "$(docker compose ps --format '{{.Health}}' storlite 2>/dev/null)" = "he
   sleep 1
 done
 
+admin_hint="set -a; . secrets/admin.env; set +a"
+[ -f secrets/admin.env ] || admin_hint="(load the admin key printed by the first setup run)"
+
 cat <<EOF
 
 storlite $version is running at https://localhost:${PORT}
 
-  Access key id:      admin
-  Secret access key:  ${read_secret}   (the secret_access_key line)
-  Region:             us-east-1, path-style addressing
+  Admin access key:  secrets/admin.env (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)
+  Region:            us-east-1, path-style addressing
 
   Try it:
-    export AWS_ACCESS_KEY_ID=admin AWS_DEFAULT_REGION=us-east-1
-    export AWS_SECRET_ACCESS_KEY="\$(${read_secret} | sed -n 's/^secret_access_key = "\\(.*\\)"/\\1/p')"
+    ${admin_hint}
     aws --endpoint-url https://localhost:${PORT} --ca-bundle secrets/tls.crt s3 mb s3://my-bucket
+
+  Manage keys and buckets:
+    docker compose exec storlite storlite admin key create --grant 'my-bucket:read,list,write,delete'
+    docker compose exec storlite storlite admin key list
+    docker compose exec storlite storlite admin bucket list
 
   Change settings:   edit config.toml, then: docker compose restart storlite
   Change port/image: edit .env, then:        docker compose up -d
   Logs:              docker compose logs -f storlite
+  Back up secrets/master.key separately; restoring a backup's access keys needs it.
 EOF

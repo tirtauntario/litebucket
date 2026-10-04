@@ -6,7 +6,9 @@
 # Files next to this one:
 #   .env          STORLITE_IMAGE (pinned version) and STORLITE_PORT
 #   config.toml   server settings; edit, then `docker compose restart`
-#   secrets/      credentials.toml, tls.crt, tls.key (owned by uid 65532 on Linux)
+#   secrets/      master.key, tls.crt, tls.key (owned by uid 65532 on Linux)
+# Manage access keys and buckets:
+#   docker compose exec storlite storlite admin key list
 # Manual setup and operations: docs/installation.md#docker
 services:
   storlite:
@@ -16,9 +18,12 @@ services:
     volumes:
       - storlite-data:/data
       - ./config.toml:/etc/storlite/config.toml:ro
+    # The admin API socket lives here (in memory, owner-only).
+    tmpfs:
+      - /run/storlite:uid=65532,gid=65532,mode=0700
     secrets:
-      - source: storlite-credentials
-        target: storlite-credentials.toml
+      - source: storlite-master-key
+        target: storlite-master.key
       - source: storlite-tls-crt
         target: storlite-tls.crt
       - source: storlite-tls-key
@@ -34,8 +39,8 @@ services:
       nofile: { soft: 8192, hard: 8192 }
 
 secrets:
-  storlite-credentials:
-    file: ./secrets/credentials.toml
+  storlite-master-key:
+    file: ./secrets/master.key
   storlite-tls-crt:
     file: ./secrets/tls.crt
   storlite-tls-key:

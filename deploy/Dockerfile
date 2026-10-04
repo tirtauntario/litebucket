@@ -17,8 +17,10 @@ FROM gcr.io/distroless/cc-debian13:nonroot
 COPY --from=build /src/target/release/storlite /usr/local/bin/storlite
 COPY --from=build --chown=65532:65532 /out/data /data
 USER 65532:65532
+# Lets `docker compose exec storlite storlite admin ...` find the config.
+ENV STORLITE_CONFIG=/etc/storlite/config.toml
 VOLUME ["/data"]
 EXPOSE 9000
 HEALTHCHECK --interval=30s --timeout=5s CMD ["/usr/local/bin/storlite", "healthcheck", "--url", "http://127.0.0.1:9001/readyz"]
 ENTRYPOINT ["/usr/local/bin/storlite"]
-CMD ["serve", "--config", "/etc/storlite/config.toml"]
+CMD ["serve"]
