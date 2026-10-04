@@ -7,6 +7,9 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src src
 COPY migrations migrations
+# Configuration templates embedded by `storlite config template`.
+COPY docs/examples/config.example.toml docs/examples/
+COPY deploy/config.toml deploy/
 RUN cargo build --release --locked \
  && install -d -m 0700 /out/data
 

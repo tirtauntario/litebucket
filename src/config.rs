@@ -246,6 +246,10 @@ pub struct Overrides {
     pub log_level: Option<String>,
 }
 
+/// Commented configuration templates printed by `storlite config template`.
+pub const TEMPLATE_STANDALONE: &str = include_str!("../docs/examples/config.example.toml");
+pub const TEMPLATE_DOCKER: &str = include_str!("../deploy/config.toml");
+
 /// Documented non-secret environment overrides.
 pub const ENV_OVERRIDES: &[&str] = &[
     "STORLITE_HTTP_LISTEN",
@@ -668,7 +672,7 @@ pub fn validate_region(region: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    const EXAMPLE: &str = include_str!("../docs/examples/config.example.toml");
+    const EXAMPLE: &str = TEMPLATE_STANDALONE;
 
     fn example() -> Config {
         let mut c = Config::parse(EXAMPLE).unwrap();
@@ -738,5 +742,45 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(c.http.listen, "127.0.0.1:9200");
+    }
+
+    /// Uncomment every `# key = value` default line.
+    fn uncomment_defaults(text: &str) -> String {
+        text.lines()
+            .map(|l| match l.strip_prefix("# ") {
+                Some(rest)
+                    if rest.split_once(" = ").is_some_and(|(k, _)| {
+                        k.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+                    }) =>
+                {
+                    rest
+                }
+                _ => l,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn templates_validate_and_document_real_defaults() {
+        for (name, text) in [
+            ("standalone", TEMPLATE_STANDALONE),
+            ("docker", TEMPLATE_DOCKER),
+        ] {
+            let mut c = Config::parse(text).unwrap_or_else(|e| panic!("{name}: {e}"));
+            c.base_dir = PathBuf::from("/srv/storlite");
+            c.resolve_paths();
+            c.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
+
+            // Every commented key exists, and its documented value is the default.
+            let full = uncomment_defaults(text);
+            assert_ne!(full, text, "{name}: no commented defaults found");
+            let mut u = Config::parse(&full).unwrap_or_else(|e| panic!("{name} uncommented: {e}"));
+            u.http.tls_certificate_file = c.http.tls_certificate_file.clone();
+            u.http.tls_private_key_file = c.http.tls_private_key_file.clone();
+            u.base_dir = c.base_dir.clone();
+            u.resolve_paths();
+            assert_eq!(format!("{:?}", u), format!("{:?}", c), "{name}");
+        }
     }
 }

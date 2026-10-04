@@ -2,6 +2,7 @@ target
 .interop
 .git
 docs
+!docs/examples
 tests
 scripts
 deploy/secrets

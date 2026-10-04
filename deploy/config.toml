@@ -1,40 +1,46 @@
-# storlite configuration.
+# storlite configuration for Docker.
 #
-# Generate this file with `storlite config template > config.toml`.
+# Generate this file with `storlite config template --docker > config.toml`.
 # Lines starting with "# key = value" show the built-in default. To change a
 # setting, remove the leading "# " and edit the value. Unknown keys are errors.
-# Check your edits with `storlite config check --config config.toml`.
+# Check your edits, then restart:
+#   docker compose run --rm storlite config check --config /etc/storlite/config.toml
+#   docker compose restart storlite
 #
 # Units: *_bytes are plain integers (1 GiB = 1073741824); durations carry
 # their unit in the name (*_seconds, *_ms).
 
-# Relative paths resolve against this file's directory.
-data_dir = "./data"
-credentials_file = "./credentials.toml"
+# Inside the container. /data is the named volume; secrets are mounted
+# read-only from ./secrets/ by compose.yaml. Leave these paths as they are.
+data_dir = "/data"
+credentials_file = "/run/secrets/storlite-credentials.toml"
 
 # Region that clients must sign requests for. Fixed when the store is
 # initialized; startup refuses a different value later.
 region = "us-east-1"
 
-# Accept a credentials file that is group-readable (0640), for secret mounts
-# with a dedicated group. World-readable is always refused.
+# Accept a credentials file that is group-readable (0640), for orchestrators
+# that mount secrets with a dedicated group. World-readable is always refused.
 # credentials_allow_group_read = false
 
 [http]
-# S3 API listener. Loopback plain HTTP is for local use only.
-listen = "127.0.0.1:9000"
-allow_insecure_loopback_http = true
+# S3 API listener. compose.yaml publishes container port 9000.
+listen = "0.0.0.0:9000"
 
-# To serve other machines, listen on "0.0.0.0:9000", remove
-# allow_insecure_loopback_http, and set a TLS certificate chain and private
-# key (PEM). Loaded at startup: restart after renewing the certificate.
-# tls_certificate_file = "/etc/storlite/tls.crt"
-# tls_private_key_file = "/etc/storlite/tls.key"
+# TLS certificate chain and private key (PEM). Required when listening on a
+# non-loopback address, unless trusted_proxy_mode is used. Loaded at startup:
+# restart after renewing the certificate.
+tls_certificate_file = "/run/secrets/storlite-tls.crt"
+tls_private_key_file = "/run/secrets/storlite-tls.key"
 
-# Or serve plain HTTP behind a TLS-terminating proxy on another host. Only the
-# listed peer IPs may connect; X-Forwarded-* headers are never trusted.
+# Serve plain HTTP behind a TLS-terminating proxy instead of built-in TLS:
+# comment out the two tls_* lines above and set both of these. Only the listed
+# peer IPs may connect; X-Forwarded-* headers are never trusted.
 # trusted_proxy_mode = false
-# trusted_proxy_addresses = []          # e.g. ["10.0.0.5"]
+# trusted_proxy_addresses = []          # e.g. ["172.18.0.10"]
+
+# Plain HTTP on 127.0.0.1 only (local development).
+# allow_insecure_loopback_http = false
 
 # Request limits.
 # max_header_bytes = 32768              # 8 KiB .. 1 MiB
@@ -45,7 +51,7 @@ allow_insecure_loopback_http = true
 # max_clock_skew_seconds = 900          # 60 .. 3600, header-signed requests
 
 [management]
-# /livez, /readyz and /metrics. Keep this private (loopback or a private network).
+# /livez, /readyz and /metrics. Keep this private: inside the container only.
 listen = "127.0.0.1:9001"
 # metrics_enabled = true
 
@@ -94,7 +100,7 @@ listen = "127.0.0.1:9001"
 # garbage_batch_size = 100
 # garbage_grace_seconds = 60
 # garbage_interval_seconds = 60
-# shutdown_grace_seconds = 30           # keep below systemd TimeoutStopSec (45s)
+# shutdown_grace_seconds = 30           # keep below compose stop_grace_period (40s)
 
 [logging]
 # format = "json"                       # json or text

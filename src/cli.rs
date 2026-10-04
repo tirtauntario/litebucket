@@ -107,6 +107,12 @@ enum Command {
 enum ConfigCommand {
     /// Validate configuration structure without starting listeners.
     Check(ConfigArg),
+    /// Print a commented configuration file with every setting and its default.
+    Template {
+        /// Paths and listeners for the Docker image (/data, /run/secrets, TLS).
+        #[arg(long)]
+        docker: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -201,6 +207,19 @@ fn execute(cli: Cli) -> Result<ExitCode> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&cfg.summary()).unwrap_or_default()
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Config {
+            command: ConfigCommand::Template { docker },
+        } => {
+            print!(
+                "{}",
+                if docker {
+                    crate::config::TEMPLATE_DOCKER
+                } else {
+                    crate::config::TEMPLATE_STANDALONE
+                }
             );
             Ok(ExitCode::SUCCESS)
         }
