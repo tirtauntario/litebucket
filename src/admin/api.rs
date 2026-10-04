@@ -352,6 +352,13 @@ async fn audit(State(store): State<Arc<Store>>, Query(q): Query<AuditQuery>) -> 
 /// socket another process still answers on, or any non-socket file, is an
 /// error.
 pub fn bind(path: &Path) -> Result<UnixListener> {
+    // sun_path holds 104 bytes on macOS and 108 on Linux, including the NUL.
+    if path.as_os_str().len() > 100 {
+        return Err(Error::config(format!(
+            "admin socket path {} is longer than 100 bytes; set [admin] socket to a shorter path (for example /run/storlite/admin.sock)",
+            path.display()
+        )));
+    }
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
         && !parent.is_dir()
     {

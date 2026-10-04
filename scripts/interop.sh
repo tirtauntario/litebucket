@@ -35,7 +35,10 @@ tls_private_key_file = \"./key.pem\""
 fi
 cat > "$WORK/config.toml" <<CFG
 data_dir = "./data"
-credentials_file = "./credentials.toml"
+[secrets]
+master_key_file = "./master.key"
+[admin]
+socket = "./admin.sock"
 [http]
 listen = "127.0.0.1:$PORT"
 $TLS_LINES
@@ -48,15 +51,9 @@ min_disk_free_percent = 0
 format = "json"
 level = "info"
 CFG
-cat > "$WORK/credentials.toml" <<CRED
-[[credentials]]
-id = "interop-admin"
-secret_access_key = "interopsecretinteropsecretinterop01"
-enabled = true
-global_grants = ["admin"]
-CRED
-chmod 600 "$WORK/credentials.toml"
-"$BIN" init --config "$WORK/config.toml" >/dev/null
+"$BIN" init --config "$WORK/config.toml" --admin-key-output "$WORK/admin.env" >/dev/null
+KEY_ID=$(sed -n 's/^AWS_ACCESS_KEY_ID=//p' "$WORK/admin.env")
+SECRET=$(sed -n 's/^AWS_SECRET_ACCESS_KEY=//p' "$WORK/admin.env")
 "$BIN" serve --config "$WORK/config.toml" 2>"$WORK/serve.log" &
 PID=$!
 for _ in $(seq 1 100); do
@@ -65,8 +62,8 @@ for _ in $(seq 1 100); do
 done
 
 export STORLITE_ENDPOINT="$SCHEME://127.0.0.1:$PORT"
-export STORLITE_KEY_ID=interop-admin
-export STORLITE_SECRET=interopsecretinteropsecretinterop01
+export STORLITE_KEY_ID="$KEY_ID"
+export STORLITE_SECRET="$SECRET"
 export STORLITE_REGION=us-east-1
 export INTEROP_WORK="$WORK"
 

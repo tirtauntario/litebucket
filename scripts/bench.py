@@ -87,7 +87,10 @@ def main():
     port, mport = free_port(), free_port()
     with open(os.path.join(work, "config.toml"), "w") as f:
         f.write(f"""data_dir = "./data"
-credentials_file = "./credentials.toml"
+[secrets]
+master_key_file = "./master.key"
+[admin]
+socket = "./admin.sock"
 [http]
 listen = "127.0.0.1:{port}"
 allow_insecure_loopback_http = true
@@ -99,12 +102,10 @@ min_disk_free_percent = 0
 [logging]
 level = "warn"
 """)
-    creds = os.path.join(work, "credentials.toml")
-    with open(creds, "w") as f:
-        f.write('[[credentials]]\nid = "bench"\nsecret_access_key = "benchsecretbenchsecretbenchsecret01"\nenabled = true\nglobal_grants = ["admin"]\n')
-    os.chmod(creds, 0o600)
     cfg = os.path.join(work, "config.toml")
-    subprocess.run([BIN, "init", "--config", cfg], check=True, capture_output=True)
+    key_env = os.path.join(work, "admin.env")
+    subprocess.run([BIN, "init", "--config", cfg, "--admin-key-output", key_env], check=True, capture_output=True)
+    creds = dict(line.strip().split("=", 1) for line in open(key_env) if "=" in line)
     server = subprocess.Popen([BIN, "serve", "--config", cfg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(200):
         try:
@@ -118,7 +119,7 @@ level = "warn"
         # One session per client: boto3's default session is not thread-safe.
         return boto3.session.Session().client(
             "s3", endpoint_url=endpoint, region_name="us-east-1",
-            aws_access_key_id="bench", aws_secret_access_key="benchsecretbenchsecretbenchsecret01",
+            aws_access_key_id=creds["AWS_ACCESS_KEY_ID"], aws_secret_access_key=creds["AWS_SECRET_ACCESS_KEY"],
             config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, max_pool_connections=32),
         )
 

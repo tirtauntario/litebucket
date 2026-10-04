@@ -352,7 +352,12 @@ impl Config {
         let base = self.base_dir.clone();
         let resolve = |p: &mut PathBuf| {
             if p.is_relative() {
-                *p = base.join(&*p);
+                // Drop `.` components so paths print as /dir/data, not /dir/./data.
+                let rel: PathBuf = p
+                    .components()
+                    .filter(|c| !matches!(c, std::path::Component::CurDir))
+                    .collect();
+                *p = base.join(rel);
             }
         };
         resolve(&mut self.data_dir);
@@ -418,11 +423,6 @@ impl Config {
         }
         if self.admin.socket.starts_with(&self.data_dir) {
             return Err(Error::config("admin.socket must be outside data_dir"));
-        }
-        if self.admin.socket.as_os_str().len() > 100 {
-            return Err(Error::config(
-                "admin.socket path is too long for a Unix socket (max 100 bytes)",
-            ));
         }
         let listen = self.http_listen()?;
         let mgmt = self.management_listen()?;
@@ -748,7 +748,7 @@ mod tests {
     fn example_config_parses_and_validates() {
         let c = example();
         c.validate().unwrap();
-        assert_eq!(c.data_dir, PathBuf::from("/srv/storlite/./data"));
+        assert_eq!(c.data_dir, PathBuf::from("/srv/storlite/data"));
         assert_eq!(c.limits.max_object_bytes, 100 * GIB);
         assert_eq!(c.multipart.receipt_retention_seconds, 86_400);
     }
