@@ -29,7 +29,7 @@ http-body = "1"
 http-body-util = "0.1"
 httpdate = "1"
 hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server", "http1", "service"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "http1", "service"] }
 md-5 = "0.10"
 percent-encoding = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
