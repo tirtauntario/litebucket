@@ -289,5 +289,10 @@ pub fn payload_length(req: &S3Request, decl: &auth::PayloadDecl) -> S3Result<Opt
             .map(Some)
             .map_err(|_| S3Error::invalid_argument("invalid x-amz-decoded-content-length"));
     }
-    req.content_length()
+    match req.content_length()? {
+        Some(n) => Ok(Some(n)),
+        // HTTP/1.1: no Content-Length and no Transfer-Encoding means an empty body.
+        None if !req.headers.contains_key(http::header::TRANSFER_ENCODING) => Ok(Some(0)),
+        None => Err(S3Error::missing_content_length()),
+    }
 }
