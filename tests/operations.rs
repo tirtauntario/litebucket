@@ -475,3 +475,36 @@ async fn trusted_proxy_mode_refuses_other_peers() {
     let n = t.read_to_end(&mut buf).unwrap_or(0);
     assert_eq!(n, 0, "no response to a non-proxy peer");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn db_04_missing_or_newer_metadata_never_opens_an_empty_store() {
+    let (mut s, c) = setup_with("").await;
+    c.put("/docs/a", b"a").await;
+    s.stop().await;
+    let cfg = load_config(&s.config_path);
+    // A newer schema version is refused, and nothing is modified.
+    {
+        let conn = rusqlite::Connection::open(s.data_dir().join("metadata.sqlite3")).unwrap();
+        conn.execute("INSERT INTO schema_migrations VALUES (999, 'future', zeroblob(32), 0)", [])
+            .unwrap();
+    }
+    let creds = storlite::credentials::CredentialSet::load(&cfg.credentials_file, false).unwrap();
+    assert!(Store_open(cfg.clone(), creds).is_err());
+    {
+        let conn = rusqlite::Connection::open(s.data_dir().join("metadata.sqlite3")).unwrap();
+        conn.execute("DELETE FROM schema_migrations WHERE version = 999", []).unwrap();
+    }
+    // A missing database in a non-empty data directory is never recreated.
+    let db = s.data_dir().join("metadata.sqlite3");
+    let moved = s.data_dir().join("moved.sqlite3");
+    std::fs::rename(&db, &moved).unwrap();
+    let _ = std::fs::remove_file(s.data_dir().join("metadata.sqlite3-wal"));
+    let _ = std::fs::remove_file(s.data_dir().join("metadata.sqlite3-shm"));
+    let creds = storlite::credentials::CredentialSet::load(&cfg.credentials_file, false).unwrap();
+    let err = Store_open(cfg.clone(), creds).unwrap_err().to_string();
+    assert!(err.contains("refusing to create an empty store"), "{err}");
+    assert!(!db.exists());
+    std::fs::rename(&moved, &db).unwrap();
+    s.boot().await;
+    assert_eq!(s.admin().get("/docs/a", "").await.body, b"a");
+}
