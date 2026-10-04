@@ -111,12 +111,19 @@ enum ConfigCommand {
 
 #[derive(Subcommand, Debug)]
 enum CredentialsCommand {
-    /// Write a new disabled credential with a 256-bit secret to a new 0600 file.
+    /// Write a new credential with a 256-bit secret to a new 0600 file
+    /// (disabled and without grants unless --enable / --global-grant are given).
     Generate {
         #[arg(long)]
         id: String,
         #[arg(long)]
         output: PathBuf,
+        /// Write the credential enabled (default: disabled).
+        #[arg(long)]
+        enable: bool,
+        /// Add a global grant: admin, list_buckets, or create_bucket (repeatable).
+        #[arg(long = "global-grant", value_name = "GRANT")]
+        global_grants: Vec<String>,
     },
     /// Validate a credentials file (permissions, syntax, grants).
     Check {
@@ -198,13 +205,26 @@ fn execute(cli: Cli) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Credentials {
-            command: CredentialsCommand::Generate { id, output },
+            command:
+                CredentialsCommand::Generate {
+                    id,
+                    output,
+                    enable,
+                    global_grants,
+                },
         } => {
-            crate::credentials::generate(&id, &output)?;
-            println!(
-                "wrote disabled credential '{id}' to {} (mode 0600); merge it into the credentials file, add grants, and enable it",
-                output.display()
-            );
+            crate::credentials::generate(&id, &output, enable, &global_grants)?;
+            if enable {
+                println!(
+                    "wrote enabled credential '{id}' to {} (mode 0600)",
+                    output.display()
+                );
+            } else {
+                println!(
+                    "wrote disabled credential '{id}' to {} (mode 0600); merge it into the credentials file, add grants, and enable it",
+                    output.display()
+                );
+            }
             Ok(ExitCode::SUCCESS)
         }
         Command::Credentials {
