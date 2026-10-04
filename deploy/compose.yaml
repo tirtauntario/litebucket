@@ -1,20 +1,21 @@
-# Single-process deployment: no database or worker containers.
-# See docs/installation.md#docker for the full walkthrough. In short:
-#   1. put credentials.toml, tls.crt and tls.key in ./secrets/
-#      (on Linux: chown 65532:65532 secrets/* && chmod 0400 secrets/*)
-#   2. docker compose run --rm storlite init --config /etc/storlite/config.toml
-#   3. docker compose up -d
-# To run a locally built image instead of the published one:
-#   docker build -f deploy/Dockerfile -t storlite:local .
-#   STORLITE_IMAGE=storlite:local docker compose up -d
+# storlite with Docker Compose: one container, no database or worker services.
+#
+# Easiest setup (creates config.toml, .env and secrets/, then starts):
+#   curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy/setup.sh | sh
+#
+# Files next to this one:
+#   .env          STORLITE_IMAGE (pinned version) and STORLITE_PORT
+#   config.toml   server settings; edit, then `docker compose restart`
+#   secrets/      credentials.toml, tls.crt, tls.key (owned by uid 65532 on Linux)
+# Manual setup and operations: docs/installation.md#docker
 services:
   storlite:
     image: ${STORLITE_IMAGE:-ghcr.io/tirtauntario/storlite:latest}
     ports:
-      - "9000:9000"
+      - "${STORLITE_PORT:-9000}:9000"
     volumes:
       - storlite-data:/data
-      - ./config.container.toml:/etc/storlite/config.toml:ro
+      - ./config.toml:/etc/storlite/config.toml:ro
     secrets:
       - source: storlite-credentials
         target: storlite-credentials.toml
