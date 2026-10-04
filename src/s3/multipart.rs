@@ -679,7 +679,8 @@ impl CompletionJob {
         let etag = checksums::multipart_etag(&md5s);
         let staged = received.sync().await?;
         let published = staged.publish().await?;
-        let blob = published.final_facts(Some(checksum.clone()));
+        let mut blob = published.final_facts(Some(checksum.clone()));
+        blob.part_sizes = Some(self.selected.iter().map(|p| p.size).collect());
         let sid = blob.storage_id;
         let receipt = Receipt {
             bucket: self.bucket_name.clone(),

@@ -372,11 +372,6 @@ pub fn validate(req: &S3Request, op: Op, owner_id: &str) -> S3Result<()> {
             "Object versioning is not supported by this service.",
         ));
     }
-    if req.has_q("partNumber") && matches!(op, Op::GetObject | Op::HeadObject) {
-        return Err(S3Error::not_implemented(
-            "Reading an object by partNumber is not supported by this service.",
-        ));
-    }
     let specific = op_headers(op);
     for name in req.headers.keys() {
         let n = name.as_str();

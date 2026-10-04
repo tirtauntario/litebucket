@@ -126,7 +126,31 @@ async fn mpu_01_parallel_parts_and_replacement() {
         .collect();
     let expected = checksums::multipart_etag(&md5s);
     assert_eq!(g.header("etag").unwrap(), format!("\"{expected}\""));
-    assert_eq!(g.header("x-amz-mp-parts-count").unwrap(), "3");
+    assert!(
+        g.header("x-amz-mp-parts-count").is_none(),
+        "only with partNumber"
+    );
+    // partNumber reads return each part's exact byte range.
+    for (n, p) in [(1u32, &p1), (2, &p2), (3, &p3)] {
+        let r = c.get("/docs/big", &format!("partNumber={n}")).await;
+        assert_eq!(r.status, 206);
+        assert_eq!(r.header("x-amz-mp-parts-count").unwrap(), "3");
+        assert!(r.body == *p, "part {n}");
+    }
+    assert_eq!(
+        c.get("/docs/big", "partNumber=4").await.code(),
+        "InvalidPartNumber"
+    );
+    let h = c
+        .send(
+            "HEAD",
+            "/docs/big",
+            "partNumber=1",
+            &[],
+            Payload::Signed(vec![]),
+        )
+        .await;
+    assert_eq!(h.header("content-length").unwrap(), (5 * MIB).to_string());
     // Parts go to multipart/aa/bb/id; after completion they become garbage.
     assert!(files_under(&s.data_dir().join("staging")).is_empty());
     let store = s.store();

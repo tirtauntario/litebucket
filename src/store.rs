@@ -779,6 +779,7 @@ impl PublishedBlob {
             md5: self.digests.md5,
             sha256: self.digests.sha256,
             checksum,
+            part_sizes: None,
         }
     }
 

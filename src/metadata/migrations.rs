@@ -11,11 +11,18 @@ pub struct Migration {
     pub sql: &'static str,
 }
 
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial",
-    sql: include_str!("../../migrations/0001_initial.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial",
+        sql: include_str!("../../migrations/0001_initial.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "part_layout",
+        sql: include_str!("../../migrations/0002_part_layout.sql"),
+    },
+];
 
 /// On-disk storage format understood by this executable.
 pub const FORMAT_VERSION: i64 = 1;

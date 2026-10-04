@@ -258,13 +258,6 @@ fn object_headers(
     out.push(("etag".into(), quote_etag(&row.etag)));
     out.push(("last-modified".into(), http_date(row.last_modified_ms)));
     out.push(("accept-ranges".into(), "bytes".into()));
-    if let Some(parts) = row
-        .etag
-        .rsplit_once('-')
-        .and_then(|(_, n)| n.parse::<u32>().ok())
-    {
-        out.push(("x-amz-mp-parts-count".into(), parts.to_string()));
-    }
     for (k, v) in &row.user_metadata {
         out.push((format!("x-amz-meta-{k}"), v.clone()));
     }
@@ -287,6 +280,26 @@ pub async fn get_object(cx: &Cx, head: bool) -> S3Result<Response<Body>> {
     let conds = read_conditions(&cx.req, "")?;
     let range = match cx.req.header("range")? {
         Some(v) => headers::parse_range(v)?,
+        None => None,
+    };
+    let part_number = match cx.req.q("partNumber") {
+        Some(v) => {
+            let n = v
+                .parse::<u32>()
+                .ok()
+                .filter(|n| (1..=10_000).contains(n))
+                .ok_or_else(|| {
+                    S3Error::invalid_argument(
+                        "Part number must be an integer between 1 and 10000, inclusive",
+                    )
+                })?;
+            if cx.req.headers.contains_key("range") {
+                return Err(S3Error::invalid_request(
+                    "Cannot specify both Range header and partNumber query parameter",
+                ));
+            }
+            Some(n)
+        }
         None => None,
     };
     let mut overrides = Vec::new();
@@ -372,21 +385,53 @@ pub async fn get_object(cx: &Cx, head: bool) -> S3Result<Response<Body>> {
 
     let mut h = Vec::new();
     object_headers(&row, &mut h, &overrides);
-    let (status, start, len) = match range {
-        Some(r) => {
-            let (start, len) = headers::resolve_range(r, row.size)?;
-            h.push((
-                "content-range".into(),
-                format!("bytes {}-{}/{}", start, start + len - 1, row.size),
-            ));
+    let (status, start, len) = match (part_number, &row.part_sizes) {
+        (Some(n), Some(sizes)) => {
+            let idx = n as usize - 1;
+            if idx >= sizes.len() {
+                return Err(S3Error::new(
+                    "InvalidPartNumber",
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                    "The requested partnumber is not satisfiable",
+                ));
+            }
+            let start: u64 = sizes[..idx].iter().sum();
+            let len = sizes[idx];
+            h.push(("x-amz-mp-parts-count".into(), sizes.len().to_string()));
+            if len > 0 {
+                h.push((
+                    "content-range".into(),
+                    format!("bytes {}-{}/{}", start, start + len - 1, row.size),
+                ));
+            }
             (StatusCode::PARTIAL_CONTENT, start, len)
         }
-        None => {
-            if checksum_mode && let Some(c) = &row.checksum {
-                checksum_headers(c, &mut h);
+        (Some(n), None) => {
+            if n != 1 {
+                return Err(S3Error::new(
+                    "InvalidPartNumber",
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                    "The requested partnumber is not satisfiable",
+                ));
             }
             (StatusCode::OK, 0, row.size)
         }
+        (None, _) => match range {
+            Some(r) => {
+                let (start, len) = headers::resolve_range(r, row.size)?;
+                h.push((
+                    "content-range".into(),
+                    format!("bytes {}-{}/{}", start, start + len - 1, row.size),
+                ));
+                (StatusCode::PARTIAL_CONTENT, start, len)
+            }
+            None => {
+                if checksum_mode && let Some(c) = &row.checksum {
+                    checksum_headers(c, &mut h);
+                }
+                (StatusCode::OK, 0, row.size)
+            }
+        },
     };
     h.push(("content-length".into(), len.to_string()));
     if head {

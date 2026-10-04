@@ -68,6 +68,8 @@ pub struct ObjectRow {
     pub last_modified_ms: i64,
     pub size: u64,
     pub checksum: Option<StoredChecksum>,
+    /// Part sizes of an assembled multipart object.
+    pub part_sizes: Option<Vec<u64>>,
 }
 
 /// Final facts about a durably published blob, installed at commit.
@@ -78,6 +80,7 @@ pub struct BlobFinal {
     pub md5: [u8; 16],
     pub sha256: [u8; 32],
     pub checksum: Option<StoredChecksum>,
+    pub part_sizes: Option<Vec<u64>>,
 }
 
 #[derive(Clone, Debug)]
@@ -508,7 +511,8 @@ pub fn abandon_blob(conn: &Connection, id: &StorageId, garbage_after_ms: i64) ->
 
 fn finalize_blob(conn: &Connection, b: &BlobFinal, area: BlobArea) -> Result<()> {
     let n = conn.execute(
-        "UPDATE blobs SET state = 'ready', size_bytes = ?2, md5 = ?3, sha256 = ?4, checksums_json = ?5
+        "UPDATE blobs SET state = 'ready', size_bytes = ?2, md5 = ?3, sha256 = ?4, checksums_json = ?5,
+             part_sizes_json = ?7
          WHERE storage_id = ?1 AND state = 'writing' AND area = ?6",
         params![
             b.storage_id.as_bytes().as_slice(),
@@ -516,7 +520,10 @@ fn finalize_blob(conn: &Connection, b: &BlobFinal, area: BlobArea) -> Result<()>
             b.md5.as_slice(),
             b.sha256.as_slice(),
             checksum_to_json(&b.checksum),
-            area.as_str()
+            area.as_str(),
+            b.part_sizes
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "[]".into()))
         ],
     )?;
     if n != 1 {
@@ -594,7 +601,8 @@ pub fn committed_part_bytes(conn: &Connection) -> Result<u64> {
 
 const OBJECT_SELECT: &str =
     "SELECT o.bucket_id, o.object_key, o.storage_id, o.generation_id, o.etag,
-        o.headers_json, o.user_metadata_json, o.last_modified_ms, b.size_bytes, b.checksums_json
+        o.headers_json, o.user_metadata_json, o.last_modified_ms, b.size_bytes, b.checksums_json,
+        b.part_sizes_json
      FROM objects o JOIN blobs b ON b.storage_id = o.storage_id";
 
 fn object_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ObjectRow> {
@@ -613,6 +621,9 @@ fn object_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ObjectRow> {
         last_modified_ms: r.get(7)?,
         size: r.get::<_, i64>(8)? as u64,
         checksum: checksum_from_json(&checksums),
+        part_sizes: r
+            .get::<_, Option<String>>(10)?
+            .and_then(|j| serde_json::from_str(&j).ok()),
     })
 }
 
@@ -1334,6 +1345,7 @@ mod tests {
             md5: [1; 16],
             sha256: [2; 32],
             checksum: None,
+            part_sizes: None,
         }
     }
 
