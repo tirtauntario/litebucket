@@ -41,43 +41,88 @@ Transport rules enforced at startup:
 
 `storlite config check --config config.toml` validates without starting.
 
-## Credentials
+## Access keys and the admin API
 
-Credentials live in a separate TOML file (`credentials_file`), mode `0600`,
-owned by the service user. See `docs/examples/credentials.example.toml`.
+Access keys, grants, global grants, buckets, quotas and CORS live in the
+metadata database (`credentials`, `credential_grants`,
+`credential_global_grants`, `buckets`; every change is recorded in
+`admin_audit`). They are managed through the admin API while the server runs.
+See [installation.md](installation.md#managing-access-keys-and-buckets) for the
+`storlite admin` commands.
 
-```sh
-storlite credentials generate --id admin --enable --global-grant admin --output ./credentials.toml  # first key
-storlite credentials generate --id app-key --output ./app-key.secret.toml   # 0600, disabled, never overwrites
-# merge the [[credentials]] block into credentials.toml, add grants, set enabled = true
-storlite credentials check --file ./credentials.toml
-kill -HUP <pid>          # atomic reload; an invalid file keeps the previous set
-```
+**Secret storage.** SigV4 needs the raw secret, so secrets cannot be hashed.
+With `[secrets] protection = "encrypted"` (default) each secret is sealed with
+AES-256-GCM under the 32-byte master key in `master_key_file` (base64, one
+line, mode 0600/0400, outside `data_dir`). The associated data binds each
+ciphertext to the store id and access key id, so a sealed value cannot be
+moved to another key or store. With `protection = "plaintext"` secrets are
+stored as-is. At startup, storlite converts every stored secret to the
+configured mode in one transaction; it refuses to start when any secret
+cannot be read (missing or wrong master key, altered record) and changes
+nothing in that case.
 
-Grants: per bucket and literal byte prefix, actions `read`, `list`, `write`,
-`delete`, `manage_bucket` (whole bucket only); global `list_buckets`,
-`create_bucket`, `admin`. The service refuses to start without at least one
-enabled credential; placeholder secrets are rejected.
+**Admin socket.** `[admin] socket` (default `./admin.sock` next to the config;
+`/run/storlite/admin.sock` in the Docker and systemd setups). The server
+replaces a stale socket left by a crash, refuses a socket another process is
+serving, sets mode 0600, removes it at shutdown, and serves only peers whose
+effective uid (from the socket's peer credentials) is its own or root.
 
-Revocation boundary: after a reload, new requests use the new set
-immediately (including presigned URLs, which are re-validated against the
-current set); requests already authorized finish under their original
-snapshot. Rotation: add new key → reload → update apps → disable old key →
-reload.
+**Admin API** (JSON over HTTP/1.1 on the socket; used by `storlite admin`):
+
+| Method and path | Purpose |
+|---|---|
+| `GET /v1/status` | Version, store id, region, secret protection, key and bucket counts |
+| `GET /v1/keys`, `GET /v1/keys/{id}` | Key metadata and grants (never secrets) |
+| `POST /v1/keys` | Create; body `{access_key_id?, description?, enabled?, expires_at?, global_grants[], grants[]}`; returns the secret once |
+| `PATCH /v1/keys/{id}` | `{enabled?, description?, expires_at?, clear_expiry?}` |
+| `DELETE /v1/keys/{id}` | Delete the key and its grants |
+| `POST /v1/keys/{id}/rotate` | `{grace_seconds}` (≤ 30 days); returns the new secret once |
+| `POST /v1/keys/{id}/grants` | Add or replace `{bucket, prefix, actions[]}` |
+| `POST /v1/keys/{id}/grants/remove` | `{bucket, prefix}` |
+| `PUT`/`DELETE /v1/keys/{id}/global-grants/{name}` | `admin`, `list_buckets`, `create_bucket` |
+| `GET`/`POST /v1/buckets`, `GET`/`DELETE /v1/buckets/{name}` | List, create `{name, quota_bytes?, cors?}`, show, delete (empty only) |
+| `PUT /v1/buckets/{name}/quota` | `{quota_bytes: n \| null}` |
+| `PUT`/`DELETE /v1/buckets/{name}/cors` | `{rules: [...]}` (same limits as PutBucketCors) |
+| `GET /v1/audit?limit=N` | Newest audit records first |
+
+Errors are `{"error": {"code", "message"}}` with 400 (`invalid_request`),
+404 (`not_found`), 409 (`conflict`), 503 (`overloaded`) or 500.
+
+**Consistency.** Each change runs in one metadata transaction together with
+its audit record, then the in-memory key snapshot is rebuilt before the
+response is sent: new, disabled, rotated and deleted keys take effect on the
+next request, including presigned URLs, which are re-validated against the
+current set. Requests already authorized finish under their original
+snapshot. A change that would leave no enabled, unexpired admin key is
+refused (409). Previous secrets past their rotation grace period stop
+authenticating immediately and are deleted by the expiry task within a
+minute.
+
+**Grants:** per bucket and literal byte prefix, actions `read`, `list`,
+`write`, `delete`, `manage_bucket` (whole bucket only); global
+`list_buckets`, `create_bucket`, `admin`. The service refuses to start
+without at least one enabled access key.
+
+**Recovery:** `storlite admin recover` (server stopped; it takes the store
+lock) adds a new admin key directly in the database. It first checks that
+the configured master key opens every stored secret, so keys sealed under
+different master keys are never mixed; `--reset-keys` deletes all keys first
+(for a lost master key).
 
 ## Lifecycle commands
 
 ```sh
-storlite init  --config config.toml     # new store; refuses a non-empty directory
+storlite init  --config config.toml     # new store + master key (if missing) + first admin key
 storlite serve --config config.toml
 storlite healthcheck --url http://127.0.0.1:9001/readyz
 storlite doctor --config config.toml           # offline, read-only report
 storlite check  --config config.toml --full    # + hash every referenced file, report untracked files
 storlite gc     --config config.toml --dry-run # default
 storlite gc     --config config.toml --apply   # recovery + delete eligible tracked garbage
-storlite bucket set-quota --config config.toml --name documents --bytes 10G   # or --clear
+storlite admin  --config config.toml recover   # offline: new admin key (--reset-keys: drop all keys first)
+storlite master-key generate --output ./master.key
 storlite backup  --config config.toml --destination /backup/snapshot-001
-storlite restore --source /backup/snapshot-001 --data-dir /srv/storlite-restored
+storlite restore --source /backup/snapshot-001 --data-dir /srv/storlite-restored --master-key-file ./master.key
 ```
 
 Offline commands take the same exclusive lock; stop the server first.
@@ -90,8 +135,10 @@ operator decision. Exit codes: `0` OK, `2` problems found, `1` error,
 Startup: validate config → lock → validate ownership/permissions/same device →
 open metadata (refuses a missing database in a non-empty directory, newer
 schemas, and failed `quick_check`) → apply migrations → recovery (WRITING
-blobs become garbage, COMPLETING uploads reopen) → load credentials → start
-workers and the management listener → bind S3 → ready.
+blobs become garbage, COMPLETING uploads reopen) → convert stored secrets to
+the configured protection mode and load access keys (refused if any cannot be
+decrypted or none is enabled) → start workers, the management listener and
+the admin socket → bind S3 → ready.
 
 Management listener (default `127.0.0.1:9001`, keep it private):
 
@@ -114,7 +161,9 @@ before starting a new one; rolling overlap with two writers is unsupported.
 |---|---|---|
 | `readyz` `halted` / writes return 503 | An fsync/publication `EIO` or an unreconciled commit outcome. Reads continue; GC pauses. | Inspect logs (`event=mutations_halted`), check the disk, restart (recovery runs at startup), then `storlite check --full`. |
 | `readyz` `integrity_failure`, GET returns 500 `InternalError` | A referenced file is missing/short/corrupt. Metadata is never deleted automatically. | `storlite check --full` to enumerate; restore affected objects from backup. |
-| `QuotaExceeded` (403) | Bucket logical quota reached. Reads/deletes still work. | Raise with `bucket set-quota`. |
+| `QuotaExceeded` (403) | Bucket logical quota reached. Reads/deletes still work. | Raise with `storlite admin bucket set-quota`. |
+| Startup: "cannot decrypt the secret of access key …" | Wrong or replaced master key, or an altered key record. Nothing was changed. | Restore the right `master_key_file`; if it is lost, `storlite admin recover --reset-keys`. |
+| Startup: "no enabled access keys" | Every key was deleted or disabled offline. | `storlite admin recover` (server stopped). |
 | 503 `ServiceUnavailable` "storage capacity" | Free space/inodes below reserve (max(`min_disk_free_bytes`, `min_disk_free_percent`)) or temporary-space cap. | Free space; reads, deletes, and aborts remain available. |
 | 503 `SlowDown` | Permit or metadata-queue wait exceeded. | Client retries; tune limits if sustained. |
 | Untracked files reported | Manual intervention or a collision. Never auto-deleted. | Investigate; remove manually only when certain. |
@@ -135,16 +184,20 @@ downloads, 16 uploads, 2 assemblies) a `nofile` limit of 4096 is ample;
   every referenced object/part file into the same sharded layout while
   verifying size and SHA-256, writes `files.jsonl` + `manifest.json`, syncs
   everything, then publishes `BACKUP_COMPLETE`.
-- The backup contains object data, metadata, and the listing-cursor HMAC key:
-  treat it as sensitive (it is created mode 0700). It does **not** include the
-  configuration or credentials file; back those up separately (or provision new
-  credentials after restore). Store identity and region are preserved.
+- The backup contains object data, metadata (including access keys, their
+  grants and the audit log), and the listing-cursor HMAC key: treat it as
+  sensitive (it is created mode 0700). Access-key secrets are encrypted unless
+  the store uses `plaintext` protection (`backup` warns). It does **not**
+  include the configuration or the master key; back those up separately.
+  Store identity and region are preserved.
 - Same-host backups do not protect against host loss; copy the completed
   directory to another failure domain and verify it there.
 - `restore` requires `BACKUP_COMPLETE`, verifies manifest, database and file
-  hashes, restores into a new/empty directory, recreates the lock file, and
-  runs the startup reference checks. Any missing or corrupt file fails the
-  restore.
+  hashes, checks with `--master-key-file` that every stored secret decrypts
+  (before writing anything; refused without it when encrypted secrets exist,
+  unless `--skip-key-check`), restores into a new/empty directory, recreates
+  the lock file, and runs the startup reference checks. Any missing or corrupt
+  file fails the restore.
 
 ## Upgrades
 

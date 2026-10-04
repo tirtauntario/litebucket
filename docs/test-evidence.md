@@ -23,17 +23,23 @@ cargo clippy --locked --all-targets --features failpoints -- -D warnings   # pas
 
 | Command | Environment | Result |
 |---|---|---|
-| `cargo test --locked --features failpoints` | macOS | 81 unit + 57 integration (objects 14, protocol 13, multipart 9, operations 13, crash 8): **138 passed, 0 failed** |
-| `cargo test --locked --features failpoints` (ext4 volume) | Linux container | 81 unit + 57 integration (objects 14, protocol 13, multipart 9, operations 13, crash 8): **138 passed, 0 failed**; fmt and clippy (`-D warnings`, with failpoints) also pass in the container |
+| `cargo test --locked --features failpoints` | macOS | 87 unit + 67 integration (admin 9, objects 14, protocol 13, multipart 9, operations 13, crash 9): **154 passed, 0 failed** |
+| `cargo test --locked --features failpoints` (ext4 volume) | Linux container | 87 unit + 67 integration (admin 9, objects 14, protocol 13, multipart 9, operations 13, crash 9): **154 passed, 0 failed**; fmt and clippy (`-D warnings`, with failpoints) also pass in the container |
 
 Breakdown by file (both environments): unit tests in `src/` (SigV4 AWS
 vectors, aws-chunked decoder, XML, config, credentials, checksums, IDs/keys,
-fsutil, metadata/migrations/queries, capacity, locks, listing proptest),
-`tests/objects.rs`, `tests/protocol.rs`, `tests/multipart.rs`,
+fsutil, metadata/migrations/queries, capacity, locks, listing proptest,
+secret sealing/tamper detection, admin client parsing),
+`tests/admin.rs` (key lifecycle, grants, rotation grace, last-admin guard,
+buckets/quota/CORS, audit without secrets, protection-mode conversion and
+wrong-master-key refusal, offline `admin recover`, the CLI over the real
+socket), `tests/objects.rs`, `tests/protocol.rs`, `tests/multipart.rs`,
 `tests/operations.rs` (in-process server, real files, real SQLite with
 production durability settings), and `tests/crash.rs` (real binary in
 subprocesses; SIGABRT via failpoints at every durable boundary; injected
-EIO/ENOSPC/uncertain commits; forced storage-ID collisions; log redaction).
+EIO/ENOSPC/uncertain commits; forced storage-ID collisions; log redaction;
+admin changes aborted before/after commit stay atomic with their audit
+record, and issued secrets never reach the log).
 
 Test configurations pin `min_disk_free_percent = 0` and a 64 MiB reserve so
 results don't depend on host disk fullness (the production default reserve of
@@ -96,9 +102,10 @@ upload/download over TLS (ETag `…-2`, byte-identical) → `healthcheck` OK →
 |---|---|---|
 | `cargo test --locked --features failpoints --target aarch64-unknown-linux-musl` (static release target) | Linux container (`rust:1.97.1-slim-trixie` + `musl-tools`, ext4 volume) | 82 unit + 57 integration: **139 passed, 0 failed** |
 | `cargo build --release --locked --target aarch64-unknown-linux-musl` | same | 6.9 MB static binary; `storlite --version` OK |
-| README standalone quick start, run verbatim (`config template` → `credentials generate --enable --global-grant admin` → `init` → `serve` → AWS CLI `mb`/`cp`/`ls` → SIGTERM) | macOS | pass; shutdown `drained: true` |
-| Manual Docker setup with the local image (`STORLITE_IMAGE=storlite:local`): credential generated via the image as the host user, self-signed cert, `compose run init`, `compose up` | Docker Desktop 29.7.2 | container `healthy`; AWS CLI `mb`/`cp`/`ls` over TLS with `--ca-bundle` |
-| `deploy/setup.sh` with the local image, `STORLITE_PORT=9443`, extra certificate names | Docker Desktop 29.7.2 | creates all files, initializes, container `healthy`; the printed AWS CLI commands work. Re-run: skips existing files, reports "already initialized". Invalid `config.toml`: setup stops and shows the parse error |
+| README standalone quick start, run verbatim (`config template` → `init --admin-key-output` (creates `master.key`) → `serve` → AWS CLI `mb`/`cp`/`ls` → `admin key create` → SIGTERM) | macOS | pass; socket mode 0600 while serving and removed at shutdown; shutdown `drained: true` |
+| `deploy/setup.sh` with the local image (`STORLITE_PORT=9443`) after the access-key move | Docker Desktop 29.7.2 | creates `master.key` (0400), TLS pair, `admin.env` (0600, from `init` output); container `healthy`; admin key works for `s3 mb`; `docker compose exec storlite storlite admin key create/list`, `bucket create --quota`, `status`, `audit` work (actor `uid:65532`); a key scoped to one bucket is refused on another |
+| Admin socket access in the compose stack | Docker Desktop 29.7.2 | `exec` as the server uid 65532: allowed. As uid 1000: refused (permission denied on the 0600 socket in the 0700 tmpfs). As root: also refused, because `cap_drop: ALL` removes root's file-permission override; use the default exec user |
+| Earlier `deploy/setup.sh` runs (credentials-file era) | Docker Desktop 29.7.2 | re-run skips existing files and reports "already initialized"; invalid `config.toml` stops setup with the parse error |
 | Config edit flow: `sed -i` on `config.toml` (`max_buckets = 1`) → `docker compose restart` | Docker Desktop 29.7.2 | new value in effect (second CreateBucket → `TooManyBuckets`) |
 
 The GitHub Actions workflows (`.github/workflows/ci.yml`, `release.yml`) and
@@ -107,7 +114,17 @@ run happens with the first tag. The Linux `chown 65532` step of the Docker
 quick start was covered by the earlier container smoke test (secrets volume
 owned by 65532, mode 0400), not by the compose bind-mount flow; the same
 applies to the Linux `chown` branch of `deploy/setup.sh` (checked with
-shellcheck only).
+shellcheck only). Other uids are stopped by the socket's file mode before the peer-uid check
+runs (see the compose row above); the peer-uid check itself is not exercised
+by an automated test. The musl build
+was last tested before the access-key move.
+
+## Real-client interoperability after the access-key move
+
+`scripts/interop.sh` now bootstraps with `init --admin-key-output` and uses
+the generated admin key. Run on macOS with the same client versions as above:
+HTTP and HTTPS (`INTEROP_TLS=1`) both pass all suites (Ruby 9 runs / 31
+assertions, Boto3 7/7, AWS CLI 12/12, Rails 12/12, browser 9/9).
 
 ## Not run
 

@@ -20,12 +20,24 @@ First public release.
   uploads, bucket CORS.
 - Durable write pipeline (fsync, no-clobber publish, directory sync, SQLite
   commit before acknowledgement) with crash recovery at every boundary.
-- Scoped credentials (bucket + prefix grants) with live reload on SIGHUP;
-  `credentials generate --enable --global-grant` creates a directly usable key.
+- Access keys stored in the metadata database, managed at runtime with
+  `storlite admin` over a local Unix-socket admin API: create (generated ids
+  and 256-bit secrets, shown once), list, enable/disable, expiry, delete,
+  rotate with a grace period, bucket/prefix grants and global grants. Changes
+  apply to the next request and are recorded in an audit log; the last admin
+  key cannot be removed.
+- Secrets encrypted at rest with AES-256-GCM under a master key file
+  (default), or stored plaintext (`[secrets] protection`); switching modes
+  converts stored secrets at startup.
+- `init` creates the master key and a first admin key; `admin recover`
+  (offline) restores admin access, with `--reset-keys` for a lost master key;
+  `master-key generate`.
+- Buckets, quotas and CORS manageable through the admin API as well as S3.
 - `config template [--docker]` prints a commented configuration file with
   every setting and its default.
-- Offline `doctor`, `check --full`, `gc`, bucket quotas, verified
-  backup/restore; `/livez`, `/readyz`, Prometheus `/metrics`.
+- Offline `doctor`, `check --full`, `gc`, verified backup/restore (access
+  keys included, encrypted; restore checks them with `--master-key-file`);
+  `/livez`, `/readyz`, Prometheus `/metrics`.
 - Static Linux (musl) and macOS release binaries, a multi-arch distroless
   image on GHCR, an install script, a one-step Docker Compose setup script
   (`deploy/setup.sh`) and a systemd unit.

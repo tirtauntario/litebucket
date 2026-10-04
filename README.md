@@ -21,7 +21,11 @@ small, durable, and easy to back up.
 - **Durable by construction:** before any write is acknowledged, it is
   fsynced, published with a no-clobber rename, directory-synced and committed
   in SQLite. Crash recovery is tested at every durable boundary.
-- **Scoped credentials:** grants per bucket and key prefix. Private by default.
+- **Access keys managed at runtime:** `storlite admin` creates, scopes
+  (per bucket and key prefix), rotates (with a grace period) and revokes keys
+  through a local admin API; changes apply to the next request. Secrets are
+  stored encrypted (AES-256-GCM) under a master key, with an audit log.
+  Private by default.
 - **Operations:** offline `doctor`, `check --full`, `gc`, per-bucket quotas,
   and verifiable backup/restore.
 
@@ -62,9 +66,17 @@ storlite/
 ├── .env                  image version and host port
 ├── config.toml           all settings, commented, with defaults
 └── secrets/
-    ├── credentials.toml  access keys (the admin key's secret is here)
+    ├── admin.env         the first admin access key (AWS_* variables)
+    ├── master.key        encrypts stored access keys; back it up
     ├── tls.crt           self-signed; replace with a real certificate
     └── tls.key
+```
+
+Create buckets and application keys with the admin CLI inside the container:
+
+```sh
+docker compose exec storlite storlite admin bucket create documents
+docker compose exec storlite storlite admin key create --grant 'documents:read,list,write,delete'
 ```
 
 To change a setting, edit `config.toml` and run `docker compose restart`. To
@@ -82,23 +94,23 @@ This setup serves plain HTTP on `127.0.0.1` for local testing only.
 mkdir storlite && cd storlite
 storlite config template > config.toml     # loopback HTTP, data in ./data
 
-# One admin credential, written with mode 0600. The secret is in this file.
-storlite credentials generate --id admin --enable --global-grant admin --output credentials.toml
-
-storlite init  --config config.toml
+# Creates ./master.key, the store, and a first admin key (written to admin.env, mode 0600).
+storlite init  --config config.toml --admin-key-output admin.env
 storlite serve --config config.toml
 ```
 
 In another terminal:
 
 ```sh
-export AWS_ACCESS_KEY_ID=admin
-export AWS_SECRET_ACCESS_KEY="$(sed -n 's/^secret_access_key = "\(.*\)"/\1/p' credentials.toml)"
+set -a; . ./admin.env; set +a              # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION=us-east-1
 
 aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://documents
 aws --endpoint-url http://127.0.0.1:9000 s3 cp ./report.pdf s3://documents/
 aws --endpoint-url http://127.0.0.1:9000 s3 ls s3://documents/
+
+# A key for an application, limited to one bucket (the secret is shown once)
+storlite admin --config config.toml key create --grant 'documents:read,list,write,delete'
 ```
 
 ## Client configuration
@@ -162,8 +174,8 @@ const s3 = new S3Client({
 
 | Document | Contents |
 |---|---|
-| [docs/installation.md](docs/installation.md) | Install, run as a systemd service or in Docker, TLS, upgrades, uninstall |
-| [docs/operations.md](docs/operations.md) | Configuration reference, credentials and grants, health checks, failure handling, backup/restore |
+| [docs/installation.md](docs/installation.md) | Install, run as a systemd service or in Docker, manage access keys and buckets, TLS, upgrades |
+| [docs/operations.md](docs/operations.md) | Configuration reference, admin API, health checks, failure handling, backup/restore |
 | [docs/compatibility.md](docs/compatibility.md) | Supported S3 operations, tested client versions, deviations |
 | [SECURITY.md](SECURITY.md) | Security model and how to report vulnerabilities |
 | [docs/benchmarks.md](docs/benchmarks.md) | Measured resource use and throughput |

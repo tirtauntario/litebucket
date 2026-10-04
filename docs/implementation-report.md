@@ -93,21 +93,23 @@ Each is recorded where it applies; this list is the single overview.
 ### Configuration and credentials
 
 6. Keys added beyond the example config (all optional with safe defaults):
-   `credentials_allow_group_read`, `http.trusted_proxy_addresses`,
+   `[secrets]`, `[admin]` (see 8–9), `http.trusted_proxy_addresses`,
    `http.max_clock_skew_seconds`, `database.queue_wait_ms`,
    `limits.admission_timeout_ms`.
 7. Environment overrides are limited to listen addresses and log level/format;
    CLI overrides to `--listen`, `--management-listen`, `--log-level`.
-8. Credential IDs: 3–128 chars of `[A-Za-z0-9._-]` (no `/`, which would break
-   SigV4 scopes). Secrets: 32–256 printable ASCII; `REPLACE_WITH…` placeholders
-   are rejected when enabled. `credentials generate` writes a **disabled**
-   fragment with a 256-bit base64url secret by default; the opt-in `--enable`
-   and `--global-grant` flags produce a directly usable file (e.g. the first
-   admin key) for install docs. The secret is still never printed or accepted
-   as an argument, as the spec requires.
-9. The credentials file must not be group/other-readable (unless
-   `credentials_allow_group_read`, which still forbids world access). Symlinks
-   (secret mounts) are followed for this check only.
+8. Access keys live in the metadata database and are managed through a local
+   admin API (ADR 0004; a deliberate deviation from the spec's credentials
+   file). Key ids: 3–128 chars of `[A-Za-z0-9._-]` (no `/`, which would break
+   SigV4 scopes); generated ids are `SL` + 18 base32 characters. Secrets are
+   generated server-side (256-bit, base64url), returned once on create/rotate,
+   and never accepted from callers.
+9. Secret protection is configurable: `encrypted` (default; AES-256-GCM under
+   a master key file outside `data_dir`, AAD = store id + key id) or
+   `plaintext`. Startup converts stored secrets to the configured mode in one
+   transaction and refuses to start if any secret cannot be decrypted. The
+   master key file must not be group/other-readable; symlinks (secret mounts)
+   are followed.
 10. Trusted-proxy mode means "only these peer IPs may connect"; forwarded
     headers are ignored entirely.
 
@@ -208,11 +210,22 @@ Each is recorded where it applies; this list is the single overview.
     documented `# key = value` line and checks that it equals the built-in
     default, so the templates cannot drift from the code.
 47. Docker setup: `deploy/setup.sh` creates `compose.yaml`, `.env` (image
-    pinned to the exact version), `config.toml`, an admin credential and a
-    self-signed certificate. It never overwrites existing files, sets
-    ownership to uid 65532 on Linux, and runs the explicit `init` (the spec
-    forbids implicit initialization) before `compose up`.
-48. Interop tooling (Python venv with Boto3 and AWS CLI v2, generated Rails app)
+    pinned to the exact version), `config.toml`, the master key and a
+    self-signed certificate, runs the explicit `init` (the spec forbids
+    implicit initialization), saves the first admin key from its output to
+    `secrets/admin.env`, and starts the stack. It never overwrites existing
+    files and sets ownership to uid 65532 on Linux. The admin socket lives on
+    a tmpfs (`/run/storlite`); `STORLITE_CONFIG` in the image lets
+    `docker compose exec storlite storlite admin ...` find the config.
+48. Admin changes: one transaction per change with its audit record; the key
+    snapshot is rebuilt under `admin_lock` before the response, so changes
+    apply to the next request and an older refresh can never overwrite a newer
+    one. A change leaving no enabled admin key is refused (409). Rotation keeps
+    the previous secret for an optional grace period (≤ 30 days); the expiry
+    task deletes it afterwards. `admin recover` (offline) creates an admin key
+    and, with `--reset-keys`, deletes all keys first. Backups include the
+    (encrypted) keys; `restore --master-key-file` verifies them first.
+49. Interop tooling (Python venv with Boto3 and AWS CLI v2, generated Rails app)
     lives in git-ignored `.interop/`; nothing is installed system-wide.
 
 ## 5. Known limitations and follow-ups

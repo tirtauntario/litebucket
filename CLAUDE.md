@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The spec bundle lives in `docs/` and is the authoritative contract:
 
 - `docs/SPEC.md` — full contract; invariants **INV-01..INV-14** are mandatory.
-- `docs/examples/*.toml` — config/credentials templates (embedded in the binary and parsed by unit tests).
+- `docs/examples/config.example.toml` — standalone config template (embedded in the binary and parsed by unit tests).
 - The original implementation plan, agent prompts and reference schema were build-time material and are no longer in the repo; `migrations/` is the schema source of truth.
 
 Conventions for applying the bundle to this repo:
@@ -46,6 +46,7 @@ Releases: pushing tag `vX.Y.Z` (must equal `Cargo.toml` version) runs `.github/w
 - `src/metadata/` — connection policy (WAL, `synchronous=FULL`, verified), migrations (`migrations/*.sql`, checksummed), all SQL in `queries.rs`, bounded worker threads. Writes go through `Db::write_tx(name, f)`, which group-commits queued transactions with a savepoint each (ADR 0003); `name` labels test failpoints.
 - `src/s3/` — protocol boundary: `mod.rs` (handler: limits → parse → resolve op → capability validation → SigV4 → dispatch → errors/CORS/logging/metrics), `auth.rs`, `payload.rs` (aws-chunked/trailer decoder), `integrity.rs`, `capabilities.rs` (allowlists), `xml.rs` (bounded parser/writer), and per-area handlers (`bucket`, `object`, `listing`, `multipart`, `cors`).
 - `src/sigv4.rs` — SigV4 primitives, tested against AWS-published vectors.
+- `src/credentials.rs` (in-memory key model, grants, key generation), `src/secrets.rs` (master key, AES-256-GCM sealing; plaintext mode), `src/admin/` (ops on one transaction + audit, Unix-socket JSON API with peer-uid check, blocking client, `storlite admin` commands incl. offline `recover`). Keys live in SQLite (migration 0003); admin mutations commit then rebuild the key snapshot under `Store::admin_lock` (ADR 0004).
 - `src/maintenance.rs` (GC, multipart/receipt expiry, checkpoints, gauges), `src/server.rs` (hyper http1 + optional rustls, management listener, graceful shutdown), `src/doctor.rs`/`src/backup.rs` (offline commands), `src/cli.rs`.
 - Lock order: upload guard → per-key guard → metadata transaction; never more than one key guard; never await a guard inside a transaction.
 - No `unsafe`, no `unwrap` on network/fs/db results in production paths.

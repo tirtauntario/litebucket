@@ -29,11 +29,23 @@
   body-idle timeouts, XML size/depth/element limits (DTDs and entities are
   rejected), aws-chunked framing overhead, transfer/queue concurrency, disk
   and temporary-space reservations.
-- **Secrets:** credentials live in a separate operator-managed file (mode
-  0600). SigV4 needs the shared secret, so it is held in memory and in that
-  file in plaintext — protect the file and host accordingly. Logs and metrics
-  never contain secrets, signatures, presigned URLs, request bodies, custom
-  metadata, or (by default) object keys.
+- **Access-key secrets:** keys are generated from the OS CSPRNG (256-bit
+  secrets; ids are `SL` + 18 random base32 characters) and stored in the
+  metadata database. SigV4 needs the shared secret, so it cannot be hashed:
+  by default each secret is encrypted with AES-256-GCM under a 32-byte master
+  key kept in a file outside the data directory (owner-only permissions
+  enforced), bound to the store id and access key id so records cannot be
+  swapped. Secrets are held in memory while serving. A secret is returned only
+  once, when a key is created or rotated; listings, the audit log, logs and
+  metrics never contain it. `protection = "plaintext"` is available and
+  stores secrets unencrypted.
+- **Administration:** keys, grants and buckets are changed only through a
+  local Unix socket (mode 0600) that serves peers whose effective uid is the
+  server's or root, checked with the kernel's peer credentials. There is no
+  network admin endpoint. Every change is recorded in an audit table with the
+  caller's uid. A change that would leave no enabled admin key is refused.
+- **Logs and metrics** never contain secrets, signatures, presigned URLs,
+  request bodies, custom metadata, or (by default) object keys.
 
 ## What it does not protect
 
@@ -42,8 +54,12 @@
 - Plaintext HTTP is allowed only on loopback or behind an explicitly
   allowlisted proxy. Use the built-in TLS or a trusted TLS-terminating proxy
   that preserves `Host`, path, query, and body.
-- Backups contain object data, metadata, and the listing-token key; protect
-  and transport them as sensitive data.
+- Backups contain object data, metadata (including access keys, encrypted
+  unless plaintext protection is configured), and the listing-token key;
+  protect and transport them as sensitive data. Keep the master key in a
+  different place from the backups.
+- Anyone who can read both the master key file and the database, or who can
+  run code as the service user, can recover every secret.
 - No replication or high availability; durability depends on the storage
   device honoring `fsync`.
 

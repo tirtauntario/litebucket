@@ -53,6 +53,8 @@ Chrome for the browser suite. Run it with only the suites you have (for example
 - New durable steps need a failpoint and a case in `tests/crash.rs`.
 - Logs and metrics must never contain secrets, signatures, presigned URLs,
   bodies or (by default) object keys.
+- Access-key secrets are returned only by key create/rotate. Never add them
+  to listings, the audit log, errors or logs.
 - Match the surrounding style. `cargo fmt` is the formatter.
 
 `CLAUDE.md` summarizes the architecture for both human and AI-assisted
