@@ -105,7 +105,7 @@ level = "warn"
     os.chmod(creds, 0o600)
     cfg = os.path.join(work, "config.toml")
     subprocess.run([BIN, "init", "--config", cfg], check=True, capture_output=True)
-    server = subprocess.Popen([BIN, "serve", "--config", cfg], stderr=subprocess.DEVNULL)
+    server = subprocess.Popen([BIN, "serve", "--config", cfg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(200):
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{mport}/readyz").read()
@@ -115,7 +115,8 @@ level = "warn"
     endpoint = f"http://127.0.0.1:{port}"
 
     def client():
-        return boto3.client(
+        # One session per client: boto3's default session is not thread-safe.
+        return boto3.session.Session().client(
             "s3", endpoint_url=endpoint, region_name="us-east-1",
             aws_access_key_id="bench", aws_secret_access_key="benchsecretbenchsecretbenchsecret01",
             config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, max_pool_connections=32),
@@ -229,4 +230,7 @@ level = "warn"
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        subprocess.run(["pkill", "-f", "storlite-bench-"], capture_output=True)
