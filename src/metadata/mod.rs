@@ -133,17 +133,32 @@ pub fn with_write_tx<T>(
     conn: &mut Connection,
     f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T>,
 ) -> Result<T> {
+    with_named_write_tx(conn, "", f)
+}
+
+/// Like `with_write_tx`; `name` labels the transition for test failpoints
+/// (`before_commit:<name>`, `after_commit:<name>`, `commit:<name>`).
+pub fn with_named_write_tx<T>(
+    conn: &mut Connection,
+    name: &'static str,
+    f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T>,
+) -> Result<T> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let value = f(&tx)?;
-    crate::failpoint::hit("before_commit");
-    if let Err(e) = crate::failpoint::io("commit") {
-        NEEDS_RECONNECT.with(|c| c.set(true));
-        tracing::error!(error = %e, "injected commit failure");
-        return Err(Error::CommitUncertain);
+    let named = !name.is_empty();
+    if named {
+        crate::failpoint::hit(&format!("before_commit:{name}"));
+        if let Err(e) = crate::failpoint::io(&format!("commit:{name}")) {
+            NEEDS_RECONNECT.with(|c| c.set(true));
+            tracing::error!(error = %e, "injected commit failure");
+            return Err(Error::CommitUncertain);
+        }
     }
     match tx.commit() {
         Ok(()) => {
-            crate::failpoint::hit("after_commit");
+            if named {
+                crate::failpoint::hit(&format!("after_commit:{name}"));
+            }
             Ok(value)
         }
         Err(e) => {

@@ -250,7 +250,9 @@ async fn cap_02_concurrent_uploads_cannot_over_admit_temporary_space() {
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
     let r = c.put("/docs/second", &vec![2u8; 4_000_000]).await;
-    assert_eq!(r.status, 503, "{}", r.text());
+    // 503 before the body is read; the client may also see the early close.
+    assert!(r.status == 503 || r.status == 0, "{}: {}", r.status, r.text());
+    assert_eq!(c.head("/docs/second").await.status, 404);
     assert!(first.join().unwrap().contains("200"));
     // Reservation released: the next upload fits.
     assert_eq!(c.put("/docs/third", &vec![3u8; 4_000_000]).await.status, 200);

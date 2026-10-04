@@ -55,7 +55,19 @@ pub struct TestServer {
     pub mgmt: String,
 }
 
+/// Tests pin a small disk reserve so results do not depend on how full the
+/// host disk is (the production default is max(1 GiB, 5%)).
+pub fn with_test_limits(extra: &str) -> String {
+    const FLOOR: &str = "min_disk_free_percent = 0\nmin_disk_free_bytes = 67108864\n";
+    if extra.contains("[limits]\n") {
+        extra.replacen("[limits]\n", &format!("[limits]\n{FLOOR}"), 1)
+    } else {
+        format!("{extra}\n[limits]\n{FLOOR}")
+    }
+}
+
 pub fn write_config(dir: &Path, extra: &str) -> PathBuf {
+    let extra = with_test_limits(extra);
     let cfg = format!(
         r#"data_dir = "./data"
 credentials_file = "./credentials.toml"

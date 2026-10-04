@@ -8,7 +8,16 @@
 #[cfg(feature = "failpoints")]
 mod imp {
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, OnceLock};
+
+    /// Failpoints fire only after the server is ready, so startup recovery
+    /// and offline commands are never interrupted by them.
+    pub static ARMED: AtomicBool = AtomicBool::new(false);
+
+    pub fn armed() -> bool {
+        ARMED.load(Ordering::SeqCst)
+    }
 
     fn table() -> &'static Mutex<HashMap<String, String>> {
         static T: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
@@ -25,6 +34,9 @@ mod imp {
     }
 
     pub fn action(name: &str) -> Option<String> {
+        if !armed() {
+            return None;
+        }
         table().lock().unwrap_or_else(|e| e.into_inner()).get(name).cloned()
     }
 
@@ -61,6 +73,12 @@ pub fn io(_name: &str) -> std::io::Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+/// Enable configured failpoints (called once the server is ready).
+pub fn arm() {
+    #[cfg(feature = "failpoints")]
+    imp::ARMED.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Configure a failpoint at runtime (feature-gated test helper).

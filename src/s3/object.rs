@@ -29,7 +29,7 @@ use crate::metadata::queries::{
     self, BlobArea, ContentHeaders, DeleteOutcome, NewObject, ObjectCommit, ObjectRow, UserMetadata,
     WriteConditions,
 };
-use crate::metadata::{now_ms, with_write_tx};
+use crate::metadata::{now_ms, with_named_write_tx};
 use crate::store::{CopySource, Reconciled, StagedBlob, Store, blocking};
 
 /// Facts for the object row, minus the blob (known only after publication).
@@ -87,7 +87,7 @@ pub async fn publish_and_commit(
             let _guard = store.key_locks.lock((spec.bucket_id, spec.key.as_bytes().to_vec())).await;
             let res = store
                 .db
-                .write(move |c| with_write_tx(c, |tx| queries::commit_object(tx, &new, &cond, garbage_after)))
+                .write(move |c| with_named_write_tx(c, "object", |tx| queries::commit_object(tx, &new, &cond, garbage_after)))
                 .await;
             match res {
                 Ok(ObjectCommit::Committed { last_modified_ms, .. }) => {
@@ -385,7 +385,7 @@ async fn delete_one(store: &Arc<Store>, bucket: BucketId, key: &ObjectKey) -> S3
     let after = store.garbage_after();
     let res = store
         .db
-        .write(move |c| with_write_tx(c, |tx| queries::delete_object(tx, &bucket, &k, after)))
+        .write(move |c| with_named_write_tx(c, "delete", |tx| queries::delete_object(tx, &bucket, &k, after)))
         .await?;
     match res {
         DeleteOutcome::NoSuchBucket => Err(S3Error::no_such_bucket()),

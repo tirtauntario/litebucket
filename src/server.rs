@@ -147,6 +147,7 @@ pub async fn start(store: Arc<Store>) -> Result<Running> {
     });
     let maintenance = crate::maintenance::Maintenance::start(store.clone());
     store.set_ready(true);
+    crate::failpoint::arm();
     tracing::info!(
         event = "listening",
         s3 = %s3_addr,

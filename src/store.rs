@@ -26,7 +26,7 @@ use crate::fsutil::{Area, DataDir};
 use crate::ids::{BucketId, StorageId};
 use crate::locks::KeyedLocks;
 use crate::metadata::queries::{self, BlobArea, BlobFinal, StoreMeta};
-use crate::metadata::{self, Db, Role, migrations, now_ms, with_write_tx};
+use crate::metadata::{self, Db, Role, migrations, now_ms, with_named_write_tx, with_write_tx};
 use crate::s3::error::{S3Error, S3Result};
 use crate::telemetry::Metrics;
 
@@ -284,6 +284,15 @@ impl Store {
             .map_err(|e| S3Error::internal().with_detail(format!("supervised task failed: {e}")))?
     }
 
+    /// Convert an I/O failure. EIO from the storage stack is treated as an
+    /// unreconciled synchronization fault: mutations halt until restart.
+    pub fn io_failure(&self, e: io::Error) -> S3Error {
+        if e.raw_os_error() == Some(rustix::io::Errno::IO.raw_os_error()) {
+            self.halt(format!("storage I/O error: {e}"));
+        }
+        Error::from(e).into()
+    }
+
     /// Allocate and register a new WRITING blob, avoiding tracked and
     /// untracked ID collisions without touching existing files.
     pub async fn new_blob(self: &Arc<Self>, area: BlobArea) -> S3Result<WriteTicket> {
@@ -304,7 +313,7 @@ impl Store {
             let now = now_ms();
             let registered = self
                 .db
-                .write(move |c| with_write_tx(c, |tx| queries::register_blob(tx, &id, area, now)))
+                .write(move |c| with_named_write_tx(c, "register", |tx| queries::register_blob(tx, &id, area, now)))
                 .await?;
             if !registered {
                 tracing::warn!(event = "id_collision", storage_id = %id, "tracked storage ID collision; retrying");
@@ -352,7 +361,7 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 return Err(self.quarantine(ticket, "staging path appeared after registration").await);
             }
-            Err(e) => return Err(Error::from(e).into()),
+            Err(e) => return Err(self.io_failure(e)),
         };
         let buf_target = self.config.limits.transfer_buffer_bytes;
         let mut state = Some((file, BodyHashes::new(algorithms), BytesMut::with_capacity(buf_target)));
@@ -383,7 +392,7 @@ impl Store {
                     Ok((file, hashes, buf))
                 })
                 .await
-                .map_err(Error::from)?;
+                .map_err(|e| self.io_failure(e))?;
                 buf.clear();
                 state = Some((file, hashes, buf));
             } else {
@@ -432,7 +441,7 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 return Err(self.quarantine(ticket, "staging path appeared after registration").await);
             }
-            Err(e) => return Err(Error::from(e).into()),
+            Err(e) => return Err(self.io_failure(e)),
         };
         let buf_size = self.config.limits.transfer_buffer_bytes;
         let algs = algorithms.to_vec();
@@ -481,7 +490,7 @@ impl Store {
             if e.kind() == io::ErrorKind::InvalidData || e.kind() == io::ErrorKind::NotFound {
                 self.integrity_fault(&format!("copy/assembly input: {e}"));
             }
-            S3Error::from(Error::from(e))
+            self.io_failure(e)
         })?;
         Ok(ReceivedBlob { ticket, file, digests })
     }
@@ -652,10 +661,7 @@ impl ReceivedBlob {
         })
         .await;
         if let Err(e) = res {
-            if e.raw_os_error() == Some(rustix::io::Errno::IO.raw_os_error()) {
-                store.halt(format!("file synchronization failed: {e}"));
-            }
-            return Err(Error::from(e).into());
+            return Err(store.io_failure(e));
         }
         crate::failpoint::hit("after_file_sync");
         Ok(StagedBlob { ticket, digests })
@@ -694,12 +700,7 @@ impl StagedBlob {
                 let _ = blocking(move || data.remove(Area::Staging, &id).map(|_| ())).await;
                 Err(store.quarantine(ticket, "final path already occupied at publication").await)
             }
-            Err(e) => {
-                if e.raw_os_error() == Some(rustix::io::Errno::IO.raw_os_error()) {
-                    store.halt(format!("publication failed: {e}"));
-                }
-                Err(Error::from(e).into())
-            }
+            Err(e) => Err(store.io_failure(e)),
         }
     }
 }

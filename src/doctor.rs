@@ -179,9 +179,11 @@ fn verify_files(data: &DataDir, conn: &Connection, problems: &mut Vec<String>) -
 /// Offline GC: run restart recovery, then reclaim eligible tracked garbage.
 pub fn gc(cfg: &Config, apply: bool) -> Result<()> {
     let (data, mut conn, _, _) = open_offline(cfg, apply)?;
-    let now = now_ms();
+    // Offline, no process can hold a reader on garbage files, so the online
+    // grace period does not apply.
+    let now = i64::MAX;
     if apply {
-        let r = with_write_tx(&mut conn, |tx| queries::recover(tx, now))?;
+        let r = with_write_tx(&mut conn, |tx| queries::recover(tx, now_ms()))?;
         println!(
             "recovery: reopened {} uploads, reclaimed {} WRITING blobs",
             r.reopened_uploads, r.reclaimed_writing_blobs
