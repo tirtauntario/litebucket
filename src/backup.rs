@@ -57,7 +57,9 @@ fn area_of(name: &str) -> Result<BlobArea> {
     match name {
         "object" => Ok(BlobArea::Object),
         "part" => Ok(BlobArea::Part),
-        _ => Err(Error::integrity(format!("unknown area {name} in backup manifest"))),
+        _ => Err(Error::integrity(format!(
+            "unknown area {name} in backup manifest"
+        ))),
     }
 }
 
@@ -105,11 +107,19 @@ fn hash_file(path: &Path) -> Result<(u64, String)> {
 }
 
 /// Ensure `root/area/aa/bb` exists (0700) and return it, syncing new entries.
-fn shard_dir(root: &Path, area: Area, id: &StorageId, created: &mut Vec<PathBuf>) -> Result<PathBuf> {
+fn shard_dir(
+    root: &Path,
+    area: Area,
+    id: &StorageId,
+    created: &mut Vec<PathBuf>,
+) -> Result<PathBuf> {
     let rel = fsutil::relative_path(area, id);
     let dir = root.join(rel.parent().expect("sharded path has parents"));
     if !dir.exists() {
-        fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)?;
         created.push(dir.clone());
     }
     Ok(dir)
@@ -139,10 +149,15 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
         std::env::current_dir()?.join(destination)
     };
     if dest_abs.starts_with(&cfg.data_dir) {
-        return Err(Error::config("the backup destination must not be inside the data directory"));
+        return Err(Error::config(
+            "the backup destination must not be inside the data directory",
+        ));
     }
     if dest_abs.exists() {
-        return Err(Error::config(format!("{} already exists; backups go to a new directory", dest_abs.display())));
+        return Err(Error::config(format!(
+            "{} already exists; backups go to a new directory",
+            dest_abs.display()
+        )));
     }
     let (data, mut conn, meta, _) = open_offline(cfg, true)?;
     // Normalize interrupted operations without inventing committed objects.
@@ -162,7 +177,10 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
     let db_dest = dest_abs.join(fsutil::DB_FILE);
     conn.execute("VACUUM INTO ?1", [db_dest.to_string_lossy().as_ref()])?;
     sync_fd(open_nofollow(&db_dest)?)?;
-    let snapshot = rusqlite::Connection::open_with_flags(&db_dest, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let snapshot = rusqlite::Connection::open_with_flags(
+        &db_dest,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
     let referenced = queries::referenced_blobs(&snapshot)?;
     drop(snapshot);
 
@@ -172,14 +190,20 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
     let (mut count, mut bytes) = (0u64, 0u64);
     for (id, area, size, sha) in &referenced {
         let fs_area = area.fs_area();
-        let mut src = data
-            .open_read(fs_area, id)
-            .map_err(|e| Error::integrity(format!("referenced {} {id} cannot be opened: {e}", area.as_str())))?;
+        let mut src = data.open_read(fs_area, id).map_err(|e| {
+            Error::integrity(format!(
+                "referenced {} {id} cannot be opened: {e}",
+                area.as_str()
+            ))
+        })?;
         let dir = shard_dir(&dest_abs, fs_area, id, &mut created)?;
         let mut dst = create_new_file(&dir.join(fsutil::file_name(fs_area, id)))?;
         let digest = copy_hashed(&mut src, &mut dst, *size)?;
         if &digest != sha {
-            return Err(Error::integrity(format!("{} {id} does not match its recorded SHA-256", area.as_str())));
+            return Err(Error::integrity(format!(
+                "{} {id} does not match its recorded SHA-256",
+                area.as_str()
+            )));
         }
         sync_fd(&dst)?;
         let line = serde_json::to_string(&FileEntry {
@@ -213,7 +237,11 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
         file_bytes: bytes,
     };
     let mut mf = create_new_file(&dest_abs.join(MANIFEST))?;
-    mf.write_all(serde_json::to_string_pretty(&manifest).map_err(|e| Error::other(e.to_string()))?.as_bytes())?;
+    mf.write_all(
+        serde_json::to_string_pretty(&manifest)
+            .map_err(|e| Error::other(e.to_string()))?
+            .as_bytes(),
+    )?;
     sync_fd(&mf)?;
     sync_tree_dirs(&created, &dest_abs)?;
     // Publish completion only after everything above is durable.
@@ -235,15 +263,23 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
 
 pub fn read_manifest(source: &Path) -> Result<Manifest> {
     if !source.join(COMPLETE).exists() || source.join(INCOMPLETE).exists() {
-        return Err(Error::integrity("backup is incomplete (missing BACKUP_COMPLETE marker)"));
+        return Err(Error::integrity(
+            "backup is incomplete (missing BACKUP_COMPLETE marker)",
+        ));
     }
     let text = fs::read_to_string(source.join(MANIFEST))?;
-    let m: Manifest = serde_json::from_str(&text).map_err(|e| Error::integrity(format!("invalid manifest: {e}")))?;
+    let m: Manifest = serde_json::from_str(&text)
+        .map_err(|e| Error::integrity(format!("invalid manifest: {e}")))?;
     if m.format != FORMAT {
-        return Err(Error::integrity(format!("unsupported backup format {}", m.format)));
+        return Err(Error::integrity(format!(
+            "unsupported backup format {}",
+            m.format
+        )));
     }
     if m.storage_format > migrations::FORMAT_VERSION {
-        return Err(Error::integrity("backup storage format is newer than this executable"));
+        return Err(Error::integrity(
+            "backup storage format is newer than this executable",
+        ));
     }
     Ok(m)
 }
@@ -253,7 +289,9 @@ pub fn restore(source: &Path, data_dir: &Path) -> Result<()> {
     let m = read_manifest(source)?;
     let (db_bytes, db_sha) = hash_file(&source.join(fsutil::DB_FILE))?;
     if db_bytes != m.database_bytes || db_sha != m.database_sha256 {
-        return Err(Error::integrity("backup database does not match the manifest"));
+        return Err(Error::integrity(
+            "backup database does not match the manifest",
+        ));
     }
     // Verify the file list before writing anything.
     let mut h = Sha256::new();
@@ -262,11 +300,14 @@ pub fn restore(source: &Path, data_dir: &Path) -> Result<()> {
         let line = line?;
         h.update(line.as_bytes());
         h.update(b"\n");
-        let e: FileEntry = serde_json::from_str(&line).map_err(|e| Error::integrity(format!("invalid file entry: {e}")))?;
+        let e: FileEntry = serde_json::from_str(&line)
+            .map_err(|e| Error::integrity(format!("invalid file entry: {e}")))?;
         entries.push(e);
     }
     if hex::encode(h.finalize()) != m.files_sha256 || entries.len() as u64 != m.file_count {
-        return Err(Error::integrity("backup file list does not match the manifest"));
+        return Err(Error::integrity(
+            "backup file list does not match the manifest",
+        ));
     }
 
     let data = DataDir::create(data_dir)?;
@@ -283,41 +324,58 @@ pub fn restore(source: &Path, data_dir: &Path) -> Result<()> {
     let mut conn = metadata::open_connection(&data.db_path(), metadata::Role::Writer, 5000)?;
     let ic: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     if ic != "ok" {
-        return Err(Error::integrity(format!("restored database integrity_check: {ic}")));
+        return Err(Error::integrity(format!(
+            "restored database integrity_check: {ic}"
+        )));
     }
     migrations::verify(&conn)?;
     let meta = queries::load_store_meta(&conn)?;
     if meta.store_id.to_hex() != m.store_id || meta.region != m.region {
-        return Err(Error::integrity("restored database identity does not match the manifest"));
+        return Err(Error::integrity(
+            "restored database identity does not match the manifest",
+        ));
     }
     let referenced = queries::referenced_blobs(&conn)?;
-    let in_manifest: std::collections::HashSet<(String, String)> =
-        entries.iter().map(|e| (e.area.clone(), e.id.clone())).collect();
+    let in_manifest: std::collections::HashSet<(String, String)> = entries
+        .iter()
+        .map(|e| (e.area.clone(), e.id.clone()))
+        .collect();
     for (id, area, _, _) in &referenced {
         if !in_manifest.contains(&(area.as_str().to_string(), id.to_hex())) {
-            return Err(Error::integrity(format!("referenced {} {id} is missing from the backup", area.as_str())));
+            return Err(Error::integrity(format!(
+                "referenced {} {id} is missing from the backup",
+                area.as_str()
+            )));
         }
     }
     let mut dirs = std::collections::HashMap::new();
     for e in &entries {
         let area = area_of(&e.area)?;
-        let id = StorageId::parse_hex(&e.id).ok_or_else(|| Error::integrity("invalid storage id in backup"))?;
+        let id = StorageId::parse_hex(&e.id)
+            .ok_or_else(|| Error::integrity("invalid storage id in backup"))?;
         let fs_area = area.fs_area();
         let rel = fsutil::relative_path(fs_area, &id);
-        let mut src = open_nofollow(&source.join(&rel))
-            .map_err(|err| Error::integrity(format!("backup file {} missing: {err}", rel.display())))?;
+        let mut src = open_nofollow(&source.join(&rel)).map_err(|err| {
+            Error::integrity(format!("backup file {} missing: {err}", rel.display()))
+        })?;
         let dir = data.shard_dir(fs_area, &id)?;
         let fd = rustix::fs::openat(
             &dir,
             fsutil::file_name(fs_area, &id).as_str(),
-            rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::CREATE | rustix::fs::OFlags::EXCL | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::NOFOLLOW,
             rustix::fs::Mode::from_raw_mode(0o600),
         )
         .map_err(std::io::Error::from)?;
         let mut dst = File::from(fd);
         let d = copy_hashed(&mut src, &mut dst, e.size)?;
         if hex::encode(d) != e.sha256 {
-            return Err(Error::integrity(format!("backup file {} is corrupt", rel.display())));
+            return Err(Error::integrity(format!(
+                "backup file {} is corrupt",
+                rel.display()
+            )));
         }
         sync_fd(&dst)?;
         dirs.insert(rel.parent().map(Path::to_path_buf), dir);
@@ -329,7 +387,9 @@ pub fn restore(source: &Path, data_dir: &Path) -> Result<()> {
     let r = with_write_tx(&mut conn, |tx| queries::recover(tx, now_ms()))?;
     let problems = queries::invariant_violations(&conn)?;
     if !problems.is_empty() {
-        return Err(Error::integrity(format!("restored store failed reference checks: {problems:?}")));
+        return Err(Error::integrity(format!(
+            "restored store failed reference checks: {problems:?}"
+        )));
     }
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     drop(conn);

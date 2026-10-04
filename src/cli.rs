@@ -12,7 +12,11 @@ use crate::error::{Error, Result};
 use crate::store::Store;
 
 #[derive(Parser, Debug)]
-#[command(name = "storlite", version, about = "Compact single-host S3-compatible object storage")]
+#[command(
+    name = "storlite",
+    version,
+    about = "Compact single-host S3-compatible object storage"
+)]
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -187,7 +191,10 @@ fn execute(cli: Cli) -> Result<ExitCode> {
         } => {
             let cfg = load_config(&a.config, &Overrides::default())?;
             println!("configuration OK");
-            println!("{}", serde_json::to_string_pretty(&cfg.summary()).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&cfg.summary()).unwrap_or_default()
+            );
             Ok(ExitCode::SUCCESS)
         }
         Command::Credentials {
@@ -201,7 +208,11 @@ fn execute(cli: Cli) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Credentials {
-            command: CredentialsCommand::Check { file, allow_group_read },
+            command:
+                CredentialsCommand::Check {
+                    file,
+                    allow_group_read,
+                },
         } => {
             let set = CredentialSet::load(&file, allow_group_read)?;
             println!(
@@ -219,12 +230,20 @@ fn execute(cli: Cli) -> Result<ExitCode> {
         Command::Doctor(a) => {
             let cfg = load_config(&a.config, &Overrides::default())?;
             let ok = crate::doctor::doctor(&cfg, false)?;
-            Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(2) })
+            Ok(if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(2)
+            })
         }
         Command::Check { cfg, full } => {
             let cfg = load_config(&cfg.config, &Overrides::default())?;
             let ok = crate::doctor::doctor(&cfg, full)?;
-            Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(2) })
+            Ok(if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(2)
+            })
         }
         Command::Gc { cfg, apply, .. } => {
             let cfg = load_config(&cfg.config, &Overrides::default())?;
@@ -232,7 +251,13 @@ fn execute(cli: Cli) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Bucket {
-            command: BucketCommand::SetQuota { cfg, name, bytes, clear },
+            command:
+                BucketCommand::SetQuota {
+                    cfg,
+                    name,
+                    bytes,
+                    clear,
+                },
         } => {
             let cfg = load_config(&cfg.config, &Overrides::default())?;
             let quota = match (bytes, clear) {
@@ -286,12 +311,19 @@ fn healthcheck(url: &str) -> Result<ExitCode> {
     };
     let mut stream = std::net::TcpStream::connect(authority)?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
-    write!(stream, "GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n")?;
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
+    )?;
     let mut buf = String::new();
     stream.read_to_string(&mut buf)?;
     let ok = buf.starts_with("HTTP/1.1 200");
     println!("{}", buf.split("\r\n\r\n").nth(1).unwrap_or("").trim());
-    Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(1) })
+    Ok(if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
 }
 
 fn serve(cfg: Config) -> Result<ExitCode> {
@@ -323,11 +355,19 @@ fn serve(cfg: Config) -> Result<ExitCode> {
         let running = crate::server::start(store.clone()).await?;
         wait_for_signals(&store, &creds_path, allow_group).await?;
         let drained = running.shutdown().await;
-        Ok(if drained { ExitCode::SUCCESS } else { ExitCode::from(3) })
+        Ok(if drained {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(3)
+        })
     })
 }
 
-async fn wait_for_signals(store: &Arc<Store>, creds_path: &std::path::Path, allow_group: bool) -> Result<()> {
+async fn wait_for_signals(
+    store: &Arc<Store>,
+    creds_path: &std::path::Path,
+    allow_group: bool,
+) -> Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
     let mut hup = signal(SignalKind::hangup())?;
     let mut term = signal(SignalKind::terminate())?;
@@ -349,14 +389,21 @@ pub fn reload_credentials(store: &Arc<Store>, path: &std::path::Path, allow_grou
         Ok(set) if set.enabled_count() > 0 => {
             let n = set.enabled_count();
             store.credentials.replace(set);
-            tracing::info!(event = "credentials_reloaded", enabled = n, "credentials reloaded");
+            tracing::info!(
+                event = "credentials_reloaded",
+                enabled = n,
+                "credentials reloaded"
+            );
         }
         Ok(_) => {
             store
                 .metrics
                 .credential_reload_failures
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            tracing::error!(event = "credential_reload_failed", "reload rejected: no enabled credentials; keeping previous set");
+            tracing::error!(
+                event = "credential_reload_failed",
+                "reload rejected: no enabled credentials; keeping previous set"
+            );
         }
         Err(e) => {
             store

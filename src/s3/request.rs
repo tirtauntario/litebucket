@@ -23,16 +23,23 @@ pub struct S3Request {
 }
 
 impl S3Request {
-    pub fn parse(id: String, method: Method, uri: &http::Uri, headers: HeaderMap) -> S3Result<Self> {
+    pub fn parse(
+        id: String,
+        method: Method,
+        uri: &http::Uri,
+        headers: HeaderMap,
+    ) -> S3Result<Self> {
         let raw_path = uri.path().to_string();
         let raw_query = uri.query().unwrap_or("").to_string();
         let mut query = Vec::new();
         for part in raw_query.split('&').filter(|s| !s.is_empty()) {
             let (k, v) = part.split_once('=').unwrap_or((part, ""));
-            let k = String::from_utf8(percent_decode(k))
-                .map_err(|_| S3Error::invalid_argument("query parameter name is not valid UTF-8"))?;
-            let v = String::from_utf8(percent_decode(v))
-                .map_err(|_| S3Error::invalid_argument("query parameter value is not valid UTF-8"))?;
+            let k = String::from_utf8(percent_decode(k)).map_err(|_| {
+                S3Error::invalid_argument("query parameter name is not valid UTF-8")
+            })?;
+            let v = String::from_utf8(percent_decode(v)).map_err(|_| {
+                S3Error::invalid_argument("query parameter value is not valid UTF-8")
+            })?;
             query.push((k, v));
         }
         let (bucket, key) = split_path(&raw_path)?;
@@ -49,7 +56,10 @@ impl S3Request {
     }
 
     pub fn q(&self, name: &str) -> Option<&str> {
-        self.query.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.query
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
 
     pub fn has_q(&self, name: &str) -> bool {
@@ -61,7 +71,9 @@ impl S3Request {
         let mut it = self.headers.get_all(name).iter();
         let Some(v) = it.next() else { return Ok(None) };
         if it.next().is_some() {
-            return Err(S3Error::invalid_argument(format!("header {name} must not be repeated")));
+            return Err(S3Error::invalid_argument(format!(
+                "header {name} must not be repeated"
+            )));
         }
         v.to_str()
             .map(Some)
@@ -69,7 +81,10 @@ impl S3Request {
     }
 
     pub fn header_or_empty(&self, name: &str) -> &str {
-        self.headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("")
+        self.headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
     }
 
     pub fn bucket_name(&self) -> &str {
@@ -111,9 +126,9 @@ pub fn split_path(raw_path: &str) -> S3Result<(Option<String>, Option<ObjectKey>
     }
     let key = match key_raw {
         None | Some("") => None,
-        Some(k) => Some(
-            ObjectKey::from_bytes(percent_decode(k)).map_err(S3Error::invalid_argument)?,
-        ),
+        Some(k) => {
+            Some(ObjectKey::from_bytes(percent_decode(k)).map_err(S3Error::invalid_argument)?)
+        }
     };
     Ok((Some(bucket), key))
 }

@@ -25,10 +25,15 @@ impl ChecksumRequest {
         for alg in Algorithm::ALL {
             if let Some(v) = req.header(alg.header_name())? {
                 if out.header.is_some() {
-                    return Err(S3Error::invalid_request("Expecting a single x-amz-checksum- header. Multiple checksum Types are not allowed."));
+                    return Err(S3Error::invalid_request(
+                        "Expecting a single x-amz-checksum- header. Multiple checksum Types are not allowed.",
+                    ));
                 }
                 let d = decode_digest(alg, v).ok_or_else(|| {
-                    S3Error::invalid_request(format!("Value for {} header is invalid.", alg.header_name()))
+                    S3Error::invalid_request(format!(
+                        "Value for {} header is invalid.",
+                        alg.header_name()
+                    ))
                 })?;
                 out.header = Some((alg, d));
             }
@@ -36,7 +41,9 @@ impl ChecksumRequest {
         if let Some(t) = req.header("x-amz-trailer")? {
             let name = t.trim().to_ascii_lowercase();
             let alg = Algorithm::from_header_name(&name).ok_or_else(|| {
-                S3Error::invalid_request(format!("The value specified in the x-amz-trailer header is not supported: {t}"))
+                S3Error::invalid_request(format!(
+                    "The value specified in the x-amz-trailer header is not supported: {t}"
+                ))
             })?;
             if !payload.has_trailer() {
                 return Err(S3Error::invalid_request(
@@ -44,15 +51,20 @@ impl ChecksumRequest {
                 ));
             }
             if out.header.is_some() {
-                return Err(S3Error::invalid_request("A checksum cannot be sent both as a header and as a trailer"));
+                return Err(S3Error::invalid_request(
+                    "A checksum cannot be sent both as a header and as a trailer",
+                ));
             }
             out.trailer = Some(alg);
         } else if payload.has_trailer() {
-            return Err(S3Error::invalid_request("x-amz-trailer header is required for trailer payloads"));
+            return Err(S3Error::invalid_request(
+                "x-amz-trailer header is required for trailer payloads",
+            ));
         }
         if let Some(s) = req.header("x-amz-sdk-checksum-algorithm")? {
-            let alg = Algorithm::parse(s)
-                .ok_or_else(|| S3Error::invalid_request(format!("Checksum algorithm {s} is not supported")))?;
+            let alg = Algorithm::parse(s).ok_or_else(|| {
+                S3Error::invalid_request(format!("Checksum algorithm {s} is not supported"))
+            })?;
             let declared = out.header.as_ref().map(|(a, _)| *a).or(out.trailer);
             if declared.is_some_and(|d| d != alg) {
                 return Err(S3Error::invalid_request(
@@ -74,7 +86,11 @@ impl ChecksumRequest {
 
     /// The explicitly requested S3 algorithm, if any.
     pub fn algorithm(&self) -> Option<Algorithm> {
-        self.header.as_ref().map(|(a, _)| *a).or(self.trailer).or(self.sdk)
+        self.header
+            .as_ref()
+            .map(|(a, _)| *a)
+            .or(self.trailer)
+            .or(self.sdk)
     }
 
     /// Algorithms to compute while streaming (plus any extra required).
@@ -90,7 +106,11 @@ impl ChecksumRequest {
 
     /// Verify all supplied integrity values against computed digests.
     /// Returns the verified explicit S3 checksum `(algorithm, digest)`.
-    pub fn verify(&self, digests: &Digests, trailers: &[(String, String)]) -> S3Result<Option<(Algorithm, Vec<u8>)>> {
+    pub fn verify(
+        &self,
+        digests: &Digests,
+        trailers: &[(String, String)],
+    ) -> S3Result<Option<(Algorithm, Vec<u8>)>> {
         if let Some(md5) = &self.content_md5
             && md5 != &digests.md5
         {
@@ -105,7 +125,10 @@ impl ChecksumRequest {
                     .map(|(_, v)| v.as_str())
                     .ok_or_else(|| S3Error::invalid_request("missing checksum trailer"))?;
                 let d = decode_digest(alg, v).ok_or_else(|| {
-                    S3Error::invalid_request(format!("Value for {} trailing header is invalid.", alg.header_name()))
+                    S3Error::invalid_request(format!(
+                        "Value for {} trailing header is invalid.",
+                        alg.header_name()
+                    ))
                 })?;
                 Some((alg, d))
             }

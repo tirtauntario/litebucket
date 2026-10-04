@@ -9,10 +9,10 @@ use axum::body::Body;
 use base64::Engine;
 use http::{Response, StatusCode};
 
+use super::Cx;
 use super::error::{S3Error, S3Result};
 use super::headers::{iso8601, quote_etag, xml};
 use super::xml::XmlWriter;
-use super::Cx;
 use crate::ids::BucketId;
 use crate::keys::prefix_successor;
 use crate::metadata::queries::{self, ListedObject, UploadRow};
@@ -34,7 +34,14 @@ pub struct TokenScope {
 }
 
 impl TokenScope {
-    pub fn objects(bucket: &BucketId, prefix: &[u8], delimiter: &[u8], url: bool, owner: bool, principal: &str) -> Self {
+    pub fn objects(
+        bucket: &BucketId,
+        prefix: &[u8],
+        delimiter: &[u8],
+        url: bool,
+        owner: bool,
+        principal: &str,
+    ) -> Self {
         Self {
             kind: 1,
             bucket: *bucket.as_bytes(),
@@ -107,7 +114,8 @@ pub fn encode_bucket_token(store: &Store, after: &str, scope: &TokenScope) -> St
 
 pub fn decode_bucket_token(store: &Store, token: &str, scope: &TokenScope) -> S3Result<String> {
     let (pos, _) = decode_token(store, token, scope)?;
-    String::from_utf8(pos).map_err(|_| S3Error::invalid_argument("The continuation token provided is incorrect"))
+    String::from_utf8(pos)
+        .map_err(|_| S3Error::invalid_argument("The continuation token provided is incorrect"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,7 +149,11 @@ where
     K: Fn(&T) -> &[u8],
     P: Fn(&T) -> Vec<u8>,
 {
-    let upper = if prefix.is_empty() { None } else { prefix_successor(prefix) };
+    let upper = if prefix.is_empty() {
+        None
+    } else {
+        prefix_successor(prefix)
+    };
     let mut pos = if start.0.as_slice() < prefix {
         (prefix.to_vec(), true)
     } else {
@@ -149,13 +161,19 @@ where
     };
     let mut entries: Vec<Entry<T>> = Vec::new();
     if max == 0 {
-        return Ok(Page { entries, next: None });
+        return Ok(Page {
+            entries,
+            next: None,
+        });
     }
     'outer: loop {
         let want = (max - entries.len()).min(1000) + 1;
         let rows = fetch(&pos.0, pos.1, upper.as_deref(), want)?;
         if rows.is_empty() {
-            return Ok(Page { entries, next: None });
+            return Ok(Page {
+                entries,
+                next: None,
+            });
         }
         for row in rows {
             if entries.len() == max {
@@ -176,7 +194,12 @@ where
                         pos = (s, true);
                         continue 'outer;
                     }
-                    None => return Ok(Page { entries, next: None }),
+                    None => {
+                        return Ok(Page {
+                            entries,
+                            next: None,
+                        });
+                    }
                 }
             }
             pos = (pos_of(&row), false);
@@ -217,11 +240,15 @@ fn parse_max(v: Option<&str>, name: &str, cap: usize) -> S3Result<usize> {
     match v {
         None => Ok(cap),
         Some(s) => {
-            let n: i64 = s
-                .parse()
-                .map_err(|_| S3Error::invalid_argument(format!("Provided {name} not an integer or within integer range")))?;
+            let n: i64 = s.parse().map_err(|_| {
+                S3Error::invalid_argument(format!(
+                    "Provided {name} not an integer or within integer range"
+                ))
+            })?;
             if n < 0 {
-                return Err(S3Error::invalid_argument(format!("{name} must be non-negative")));
+                return Err(S3Error::invalid_argument(format!(
+                    "{name} must be non-negative"
+                )));
             }
             Ok((n as usize).min(cap))
         }
@@ -232,17 +259,27 @@ fn encoding(cx: &Cx) -> S3Result<bool> {
     match cx.req.q("encoding-type") {
         None => Ok(false),
         Some("url") => Ok(true),
-        Some(_) => Err(S3Error::invalid_argument("Invalid Encoding Method specified in Request")),
+        Some(_) => Err(S3Error::invalid_argument(
+            "Invalid Encoding Method specified in Request",
+        )),
     }
 }
 
 pub async fn list_objects_v2(cx: &Cx) -> S3Result<Response<Body>> {
     let prefix = cx.req.q("prefix").unwrap_or("").as_bytes().to_vec();
-    if !cx.auth.credential.allows_list(cx.req.bucket_name(), &prefix) {
+    if !cx
+        .auth
+        .credential
+        .allows_list(cx.req.bucket_name(), &prefix)
+    {
         return Err(S3Error::access_denied());
     }
     let bucket = cx.bucket().await?;
-    let delimiter = cx.req.q("delimiter").filter(|d| !d.is_empty()).map(|d| d.as_bytes().to_vec());
+    let delimiter = cx
+        .req
+        .q("delimiter")
+        .filter(|d| !d.is_empty())
+        .map(|d| d.as_bytes().to_vec());
     let cap = cx.store.config.limits.max_listing_entries;
     let max = parse_max(cx.req.q("max-keys"), "max-keys", cap)?;
     let url = encoding(cx)?;
@@ -272,14 +309,19 @@ pub async fn list_objects_v2(cx: &Cx) -> S3Result<Response<Body>> {
                     d.as_deref(),
                     max,
                     start,
-                    |from, incl, upper, limit| queries::objects_from(tx, &bid, from, incl, upper, limit),
+                    |from, incl, upper, limit| {
+                        queries::objects_from(tx, &bid, from, incl, upper, limit)
+                    },
                     |o: &ListedObject| o.key.as_slice(),
                     |o: &ListedObject| o.key.clone(),
                 )
             })
         })
         .await?;
-    let next = page.next.as_ref().map(|(pos, incl)| encode_token(&cx.store, &scope, *incl, pos));
+    let next = page
+        .next
+        .as_ref()
+        .map(|(pos, incl)| encode_token(&cx.store, &scope, *incl, pos));
 
     let mut w = XmlWriter::new();
     w.root("ListBucketResult")
@@ -325,7 +367,9 @@ pub async fn list_objects_v2(cx: &Cx) -> S3Result<Response<Body>> {
                 w.close("Contents");
             }
             Entry::Prefix(p) => {
-                w.open("CommonPrefixes").elem("Prefix", &text(p, url)).close("CommonPrefixes");
+                w.open("CommonPrefixes")
+                    .elem("Prefix", &text(p, url))
+                    .close("CommonPrefixes");
             }
         }
     }
@@ -335,15 +379,27 @@ pub async fn list_objects_v2(cx: &Cx) -> S3Result<Response<Body>> {
 
 pub async fn list_multipart_uploads(cx: &Cx) -> S3Result<Response<Body>> {
     let prefix = cx.req.q("prefix").unwrap_or("").as_bytes().to_vec();
-    if !cx.auth.credential.allows_list(cx.req.bucket_name(), &prefix) {
+    if !cx
+        .auth
+        .credential
+        .allows_list(cx.req.bucket_name(), &prefix)
+    {
         return Err(S3Error::access_denied());
     }
     let bucket = cx.bucket().await?;
-    let delimiter = cx.req.q("delimiter").filter(|d| !d.is_empty()).map(|d| d.as_bytes().to_vec());
+    let delimiter = cx
+        .req
+        .q("delimiter")
+        .filter(|d| !d.is_empty())
+        .map(|d| d.as_bytes().to_vec());
     let max = parse_max(cx.req.q("max-uploads"), "max-uploads", 1000)?;
     let url = encoding(cx)?;
     let key_marker = cx.req.q("key-marker").unwrap_or("").as_bytes().to_vec();
-    let upload_marker = cx.req.q("upload-id-marker").filter(|_| !key_marker.is_empty()).unwrap_or("");
+    let upload_marker = cx
+        .req
+        .q("upload-id-marker")
+        .filter(|_| !key_marker.is_empty())
+        .unwrap_or("");
     // Scan positions are `key \0 upload_id` (keys never contain NUL, so this
     // preserves (key, upload_id) order). "~" sorts after every hex upload ID.
     let start = if key_marker.is_empty() {
@@ -351,7 +407,11 @@ pub async fn list_multipart_uploads(cx: &Cx) -> S3Result<Response<Body>> {
     } else {
         let mut p = key_marker.clone();
         p.push(0);
-        p.extend_from_slice(if upload_marker.is_empty() { b"~" } else { upload_marker.as_bytes() });
+        p.extend_from_slice(if upload_marker.is_empty() {
+            b"~"
+        } else {
+            upload_marker.as_bytes()
+        });
         (p, false)
     };
     let (p, d, bid) = (prefix.clone(), delimiter.clone(), bucket.id);
@@ -453,7 +513,9 @@ pub async fn list_multipart_uploads(cx: &Cx) -> S3Result<Response<Body>> {
                 w.close("Upload");
             }
             Entry::Prefix(p) => {
-                w.open("CommonPrefixes").elem("Prefix", &text(p, url)).close("CommonPrefixes");
+                w.open("CommonPrefixes")
+                    .elem("Prefix", &text(p, url))
+                    .close("CommonPrefixes");
             }
         }
     }
@@ -467,7 +529,12 @@ mod tests {
     use proptest::prelude::*;
 
     /// Reference model: filter, roll up, sort, and dedupe in memory.
-    fn model(keys: &[Vec<u8>], prefix: &[u8], delim: Option<&[u8]>, start_after: &[u8]) -> Vec<Entry<Vec<u8>>> {
+    fn model(
+        keys: &[Vec<u8>],
+        prefix: &[u8],
+        delim: Option<&[u8]>,
+        start_after: &[u8],
+    ) -> Vec<Entry<Vec<u8>>> {
         let mut sorted = keys.to_vec();
         sorted.sort();
         sorted.dedup();
@@ -487,14 +554,26 @@ mod tests {
         out
     }
 
-    fn paged(keys: &[Vec<u8>], prefix: &[u8], delim: Option<&[u8]>, start_after: &[u8], max: usize) -> Vec<Entry<Vec<u8>>> {
+    fn paged(
+        keys: &[Vec<u8>],
+        prefix: &[u8],
+        delim: Option<&[u8]>,
+        start_after: &[u8],
+        max: usize,
+    ) -> Vec<Entry<Vec<u8>>> {
         let mut sorted = keys.to_vec();
         sorted.sort();
         sorted.dedup();
         let fetch = |from: &[u8], incl: bool, upper: Option<&[u8]>, limit: usize| {
             Ok(sorted
                 .iter()
-                .filter(|k| if incl { k.as_slice() >= from } else { k.as_slice() > from })
+                .filter(|k| {
+                    if incl {
+                        k.as_slice() >= from
+                    } else {
+                        k.as_slice() > from
+                    }
+                })
                 .filter(|k| upper.is_none_or(|u| k.as_slice() < u))
                 .take(limit)
                 .cloned()
@@ -503,7 +582,16 @@ mod tests {
         let mut all = Vec::new();
         let mut start = (start_after.to_vec(), false);
         for _ in 0..10_000 {
-            let page = build_page(prefix, delim, max, start.clone(), fetch, |k: &Vec<u8>| k.as_slice(), |k: &Vec<u8>| k.clone()).unwrap();
+            let page = build_page(
+                prefix,
+                delim,
+                max,
+                start.clone(),
+                fetch,
+                |k: &Vec<u8>| k.as_slice(),
+                |k: &Vec<u8>| k.clone(),
+            )
+            .unwrap();
             assert!(page.entries.len() <= max);
             all.extend(page.entries);
             match page.next {
@@ -516,7 +604,13 @@ mod tests {
 
     fn key_strategy() -> impl Strategy<Value = Vec<u8>> {
         proptest::collection::vec(
-            prop_oneof![Just(b'a'), Just(b'b'), Just(b'/'), Just(0xc3u8), Just(0xffu8)],
+            prop_oneof![
+                Just(b'a'),
+                Just(b'b'),
+                Just(b'/'),
+                Just(0xc3u8),
+                Just(0xffu8)
+            ],
             1..6,
         )
     }

@@ -84,7 +84,9 @@ fn configure(conn: &Connection, role: Role, busy_timeout_ms: u64) -> Result<()> 
     conn.busy_timeout(Duration::from_millis(busy_timeout_ms))?;
     let mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
     if !mode.eq_ignore_ascii_case("wal") {
-        return Err(Error::config(format!("SQLite refused WAL mode (got {mode})")));
+        return Err(Error::config(format!(
+            "SQLite refused WAL mode (got {mode})"
+        )));
     }
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
     #[cfg(target_vendor = "apple")]
@@ -115,7 +117,9 @@ pub fn read_settings(conn: &Connection) -> Result<Settings> {
 fn verify_settings(conn: &Connection) -> Result<()> {
     let s = read_settings(conn)?;
     if !s.journal_mode.eq_ignore_ascii_case("wal") || s.synchronous != 2 || s.foreign_keys != 1 {
-        return Err(Error::config(format!("SQLite durability settings not applied: {s:?}")));
+        return Err(Error::config(format!(
+            "SQLite durability settings not applied: {s:?}"
+        )));
     }
     Ok(())
 }
@@ -224,7 +228,9 @@ pub struct Db {
 
 impl std::fmt::Debug for Db {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Db").field("path", &self.inner.path).finish()
+        f.debug_struct("Db")
+            .field("path", &self.inner.path)
+            .finish()
     }
 }
 
@@ -301,7 +307,14 @@ impl Db {
         let stats = self.inner.stats.clone();
         stats.read_jobs.fetch_add(1, Ordering::Relaxed);
         let i = self.inner.next_reader.fetch_add(1, Ordering::Relaxed) % self.inner.readers.len();
-        submit(&self.inner.readers[i], self.inner.queue_wait, &stats.read_queue_depth, &stats, f).await
+        submit(
+            &self.inner.readers[i],
+            self.inner.queue_wait,
+            &stats.read_queue_depth,
+            &stats,
+            f,
+        )
+        .await
     }
 
     /// Stop all workers after their queues drain. The writer performs a
@@ -311,7 +324,8 @@ impl Db {
         for r in &self.inner.readers {
             let _ = r.try_send(Msg::Stop);
         }
-        let threads = std::mem::take(&mut *self.inner.threads.lock().unwrap_or_else(|e| e.into_inner()));
+        let threads =
+            std::mem::take(&mut *self.inner.threads.lock().unwrap_or_else(|e| e.into_inner()));
         for t in threads {
             let _ = t.join();
         }
@@ -442,7 +456,10 @@ mod tests {
             assert_eq!(s.foreign_keys, 1);
         }
         let r = open_connection(&path, Role::Reader, 1000).unwrap();
-        assert!(r.execute("INSERT INTO store_meta(key, value) VALUES('x', x'00')", []).is_err());
+        assert!(
+            r.execute("INSERT INTO store_meta(key, value) VALUES('x', x'00')", [])
+                .is_err()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -466,7 +483,13 @@ mod tests {
         let b = block_rx.clone();
         let first = tokio::spawn({
             let db = db.clone();
-            async move { db.write(move |_| { let _ = b.lock().unwrap().recv(); Ok(()) }).await }
+            async move {
+                db.write(move |_| {
+                    let _ = b.lock().unwrap().recv();
+                    Ok(())
+                })
+                .await
+            }
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
         let second = tokio::spawn({

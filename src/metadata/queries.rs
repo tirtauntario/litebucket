@@ -225,10 +225,16 @@ pub fn init_store_meta(conn: &Connection, region: &str, now_ms: i64) -> Result<S
     let owner_id = hex::encode(random_bytes::<32>());
     let cursor_key = random_bytes::<32>().to_vec();
     let put = |k: &str, v: Vec<u8>| -> Result<()> {
-        conn.execute("INSERT INTO store_meta(key, value) VALUES (?1, ?2)", params![k, v])?;
+        conn.execute(
+            "INSERT INTO store_meta(key, value) VALUES (?1, ?2)",
+            params![k, v],
+        )?;
         Ok(())
     };
-    put("format_version", super::migrations::FORMAT_VERSION.to_string().into_bytes())?;
+    put(
+        "format_version",
+        super::migrations::FORMAT_VERSION.to_string().into_bytes(),
+    )?;
     put("store_id", store_id.as_bytes().to_vec())?;
     put("region", region.as_bytes().to_vec())?;
     put("owner_id", owner_id.clone().into_bytes())?;
@@ -246,19 +252,24 @@ pub fn init_store_meta(conn: &Connection, region: &str, now_ms: i64) -> Result<S
 
 pub fn load_store_meta(conn: &Connection) -> Result<StoreMeta> {
     let get = |k: &str| -> Result<Vec<u8>> {
-        conn.query_row("SELECT value FROM store_meta WHERE key = ?1", [k], |r| r.get(0))
-            .optional()?
-            .ok_or_else(|| Error::integrity(format!("store_meta is missing {k}")))
+        conn.query_row("SELECT value FROM store_meta WHERE key = ?1", [k], |r| {
+            r.get(0)
+        })
+        .optional()?
+        .ok_or_else(|| Error::integrity(format!("store_meta is missing {k}")))
     };
     let text = |k: &str| -> Result<String> {
-        String::from_utf8(get(k)?).map_err(|_| Error::integrity(format!("store_meta {k} is not UTF-8")))
+        String::from_utf8(get(k)?)
+            .map_err(|_| Error::integrity(format!("store_meta {k} is not UTF-8")))
     };
     let format_version: i64 = text("format_version")?
         .parse()
         .map_err(|_| Error::integrity("invalid format_version"))?;
-    let store_id = StoreId::from_slice(&get("store_id")?).ok_or_else(|| Error::integrity("invalid store_id"))?;
+    let store_id = StoreId::from_slice(&get("store_id")?)
+        .ok_or_else(|| Error::integrity("invalid store_id"))?;
     let region = text("region")?;
-    crate::config::validate_region(&region).map_err(|_| Error::integrity("invalid stored region"))?;
+    crate::config::validate_region(&region)
+        .map_err(|_| Error::integrity("invalid stored region"))?;
     let owner_id = text("owner_id")?;
     if owner_id.len() != 64 || !owner_id.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(Error::integrity("invalid owner_id"));
@@ -281,7 +292,8 @@ pub fn load_store_meta(conn: &Connection) -> Result<StoreMeta> {
 // ---------------------------------------------------------------------------
 // Buckets
 
-const BUCKET_COLS: &str = "id, name, created_at_ms, object_count, logical_bytes, quota_bytes, cors_json";
+const BUCKET_COLS: &str =
+    "id, name, created_at_ms, object_count, logical_bytes, quota_bytes, cors_json";
 
 fn bucket_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<BucketRow> {
     Ok(BucketRow {
@@ -316,7 +328,12 @@ pub fn bucket_by_id(conn: &Connection, id: &BucketId) -> Result<Option<BucketRow
 }
 
 /// Buckets with names greater than `after` and starting with `prefix`, ordered.
-pub fn list_buckets(conn: &Connection, after: &str, prefix: &str, limit: usize) -> Result<Vec<BucketRow>> {
+pub fn list_buckets(
+    conn: &Connection,
+    after: &str,
+    prefix: &str,
+    limit: usize,
+) -> Result<Vec<BucketRow>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {BUCKET_COLS} FROM buckets WHERE name > ?1 AND substr(name, 1, length(?2)) = ?2 ORDER BY name LIMIT ?3"
     ))?;
@@ -333,7 +350,12 @@ pub enum CreateBucket {
     TooManyBuckets,
 }
 
-pub fn create_bucket(conn: &Connection, name: &str, now_ms: i64, max_buckets: u64) -> Result<CreateBucket> {
+pub fn create_bucket(
+    conn: &Connection,
+    name: &str,
+    now_ms: i64,
+    max_buckets: u64,
+) -> Result<CreateBucket> {
     if bucket_by_name(conn, name)?.is_some() {
         return Ok(CreateBucket::AlreadyExists);
     }
@@ -363,7 +385,11 @@ pub fn delete_bucket(conn: &Connection, id: &BucketId) -> Result<DeleteBucket> {
         return Ok(DeleteBucket::NoSuchBucket);
     }
     let has_object: Option<i64> = conn
-        .query_row("SELECT 1 FROM objects WHERE bucket_id = ?1 LIMIT 1", [idb], |r| r.get(0))
+        .query_row(
+            "SELECT 1 FROM objects WHERE bucket_id = ?1 LIMIT 1",
+            [idb],
+            |r| r.get(0),
+        )
         .optional()?;
     let has_upload: Option<i64> = conn
         .query_row(
@@ -393,7 +419,10 @@ pub fn set_bucket_cors(conn: &Connection, id: &BucketId, cors_json: Option<&str>
 
 pub fn set_bucket_quota(conn: &Connection, name: &str, quota: Option<u64>) -> Result<bool> {
     let q = quota.map(to_i64).transpose()?;
-    Ok(conn.execute("UPDATE buckets SET quota_bytes = ?2 WHERE name = ?1", params![name, q])? == 1)
+    Ok(conn.execute(
+        "UPDATE buckets SET quota_bytes = ?2 WHERE name = ?1",
+        params![name, q],
+    )? == 1)
 }
 
 /// Recompute a bucket's actual usage (used by periodic verification and doctor).
@@ -439,13 +468,22 @@ impl BlobArea {
 }
 
 /// Register a WRITING blob. Returns false on an ID collision.
-pub fn register_blob(conn: &Connection, id: &StorageId, area: BlobArea, now_ms: i64) -> Result<bool> {
+pub fn register_blob(
+    conn: &Connection,
+    id: &StorageId,
+    area: BlobArea,
+    now_ms: i64,
+) -> Result<bool> {
     match conn.execute(
         "INSERT INTO blobs(storage_id, area, state, created_at_ms) VALUES (?1, ?2, 'writing', ?3)",
         params![id.as_bytes().as_slice(), area.as_str(), now_ms],
     ) {
         Ok(_) => Ok(true),
-        Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ConstraintViolation => Ok(false),
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            Ok(false)
+        }
         Err(e) => Err(e.into()),
     }
 }
@@ -500,7 +538,11 @@ fn garbage_ready_blob(conn: &Connection, id: &StorageId, garbage_after_ms: i64) 
 }
 
 /// Eligible garbage, oldest first.
-pub fn garbage_batch(conn: &Connection, now_ms: i64, limit: usize) -> Result<Vec<(StorageId, BlobArea, u64)>> {
+pub fn garbage_batch(
+    conn: &Connection,
+    now_ms: i64,
+    limit: usize,
+) -> Result<Vec<(StorageId, BlobArea, u64)>> {
     let mut stmt = conn.prepare(
         "SELECT storage_id, area, size_bytes FROM blobs WHERE state = 'garbage' AND garbage_after_ms <= ?1
          ORDER BY garbage_after_ms, storage_id LIMIT ?2",
@@ -550,7 +592,8 @@ pub fn committed_part_bytes(conn: &Connection) -> Result<u64> {
 // ---------------------------------------------------------------------------
 // Objects
 
-const OBJECT_SELECT: &str = "SELECT o.bucket_id, o.object_key, o.storage_id, o.generation_id, o.etag,
+const OBJECT_SELECT: &str =
+    "SELECT o.bucket_id, o.object_key, o.storage_id, o.generation_id, o.etag,
         o.headers_json, o.user_metadata_json, o.last_modified_ms, b.size_bytes, b.checksums_json
      FROM objects o JOIN blobs b ON b.storage_id = o.storage_id";
 
@@ -562,7 +605,8 @@ fn object_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ObjectRow> {
         bucket_id: bucket_id(r.get(0)?)?,
         key: r.get(1)?,
         storage_id: storage_id(r.get(2)?)?,
-        generation_id: GenerationId::from_slice(&r.get::<_, Vec<u8>>(3)?).ok_or_else(|| invalid("generation_id"))?,
+        generation_id: GenerationId::from_slice(&r.get::<_, Vec<u8>>(3)?)
+            .ok_or_else(|| invalid("generation_id"))?,
         etag: r.get(4)?,
         headers: json_or_default(&headers),
         user_metadata: json_or_default(&meta),
@@ -615,7 +659,9 @@ pub fn commit_object(
     if let Some(list) = &cond.if_match {
         match &current {
             None => return Ok(ObjectCommit::NoSuchKey),
-            Some((_, etag, _)) if !etag_matches(etag, list) => return Ok(ObjectCommit::PreconditionFailed),
+            Some((_, etag, _)) if !etag_matches(etag, list) => {
+                return Ok(ObjectCommit::PreconditionFailed);
+            }
             _ => {}
         }
     }
@@ -631,7 +677,8 @@ pub fn commit_object(
     finalize_blob(conn, &new.blob, BlobArea::Object)?;
     let generation_id = GenerationId::random();
     let headers = serde_json::to_string(&new.headers).map_err(|e| Error::other(e.to_string()))?;
-    let meta = serde_json::to_string(&new.user_metadata).map_err(|e| Error::other(e.to_string()))?;
+    let meta =
+        serde_json::to_string(&new.user_metadata).map_err(|e| Error::other(e.to_string()))?;
     let sid = new.blob.storage_id.as_bytes().as_slice();
     let replaced = match current {
         Some((old_sid, _, old_size)) => {
@@ -670,7 +717,12 @@ pub fn commit_object(
     })
 }
 
-pub fn delete_object(conn: &Connection, bucket: &BucketId, key: &[u8], garbage_after_ms: i64) -> Result<DeleteOutcome> {
+pub fn delete_object(
+    conn: &Connection,
+    bucket: &BucketId,
+    key: &[u8],
+    garbage_after_ms: i64,
+) -> Result<DeleteOutcome> {
     let bid = bucket.as_bytes().as_slice();
     if bucket_by_id(conn, bucket)?.is_none() {
         return Ok(DeleteOutcome::NoSuchBucket);
@@ -740,7 +792,8 @@ pub fn objects_from(
 // ---------------------------------------------------------------------------
 // Multipart uploads
 
-const UPLOAD_COLS: &str = "upload_id, bucket_id, object_key, state, creator_key_id, headers_json, user_metadata_json,
+const UPLOAD_COLS: &str =
+    "upload_id, bucket_id, object_key, state, creator_key_id, headers_json, user_metadata_json,
     checksum_algorithm, checksum_type, checksum_explicit, created_at_ms, last_activity_ms,
     completion_fingerprint, result_json, receipt_expires_at_ms";
 
@@ -900,7 +953,12 @@ fn part_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PartRow> {
 }
 
 /// Committed parts with number greater than `after`, ascending.
-pub fn list_parts(conn: &Connection, upload_id: &str, after: u32, limit: usize) -> Result<Vec<PartRow>> {
+pub fn list_parts(
+    conn: &Connection,
+    upload_id: &str,
+    after: u32,
+    limit: usize,
+) -> Result<Vec<PartRow>> {
     let mut stmt = conn.prepare_cached(
         "SELECT p.part_number, p.storage_id, p.etag, b.size_bytes, b.md5, b.checksums_json, p.last_modified_ms
          FROM multipart_parts p JOIN blobs b ON b.storage_id = p.storage_id
@@ -929,13 +987,20 @@ pub fn begin_completion(
     now_ms: i64,
 ) -> Result<BeginCompletion> {
     if !register_blob(conn, output, BlobArea::Object, now_ms)? {
-        return Err(Error::integrity("storage ID collision while starting completion"));
+        return Err(Error::integrity(
+            "storage ID collision while starting completion",
+        ));
     }
     let n = conn.execute(
         "UPDATE multipart_uploads SET state = 'completing', completion_fingerprint = ?2,
              completion_manifest_json = ?3, completion_output_id = ?4
          WHERE upload_id = ?1 AND state = 'open'",
-        params![upload_id, fingerprint.as_slice(), manifest_json, output.as_bytes().as_slice()],
+        params![
+            upload_id,
+            fingerprint.as_slice(),
+            manifest_json,
+            output.as_bytes().as_slice()
+        ],
     )?;
     if n != 1 {
         conn.execute(
@@ -948,7 +1013,12 @@ pub fn begin_completion(
 }
 
 /// COMPLETING -> OPEN after a definite failure; the output blob becomes garbage.
-pub fn revert_completion(conn: &Connection, upload_id: &str, output: &StorageId, garbage_after_ms: i64) -> Result<()> {
+pub fn revert_completion(
+    conn: &Connection,
+    upload_id: &str,
+    output: &StorageId,
+    garbage_after_ms: i64,
+) -> Result<()> {
     conn.execute(
         "UPDATE multipart_uploads SET state = 'open', completion_fingerprint = NULL,
              completion_manifest_json = NULL, completion_output_id = NULL
@@ -985,7 +1055,9 @@ pub fn finish_completion(
         )
         .optional()?;
     if state.as_deref() != Some("completing") {
-        return Err(Error::integrity("upload left COMPLETING while its finalization guard was held"));
+        return Err(Error::integrity(
+            "upload left COMPLETING while its finalization guard was held",
+        ));
     }
     let outcome = commit_object(conn, new, cond, garbage_after_ms)?;
     if !matches!(outcome, ObjectCommit::Committed { .. }) {
@@ -1020,7 +1092,10 @@ fn release_parts(conn: &Connection, upload_id: &str, garbage_after_ms: i64) -> R
          WHERE storage_id IN (SELECT storage_id FROM multipart_parts WHERE upload_id = ?1) AND state = 'ready'",
         params![upload_id, garbage_after_ms],
     )?;
-    conn.execute("DELETE FROM multipart_parts WHERE upload_id = ?1", [upload_id])?;
+    conn.execute(
+        "DELETE FROM multipart_parts WHERE upload_id = ?1",
+        [upload_id],
+    )?;
     Ok(())
 }
 
@@ -1080,14 +1155,24 @@ pub fn uploads_from(
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt
         .query_map(
-            params![bucket.as_bytes().as_slice(), from_key, from_upload, upper, limit as i64],
+            params![
+                bucket.as_bytes().as_slice(),
+                from_key,
+                from_upload,
+                upper,
+                limit as i64
+            ],
             upload_row,
         )?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
-pub fn expired_open_uploads(conn: &Connection, cutoff_ms: i64, limit: usize) -> Result<Vec<String>> {
+pub fn expired_open_uploads(
+    conn: &Connection,
+    cutoff_ms: i64,
+    limit: usize,
+) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT upload_id FROM multipart_uploads WHERE state = 'open' AND last_activity_ms < ?1
          ORDER BY last_activity_ms LIMIT ?2",
@@ -1200,7 +1285,10 @@ pub fn invariant_violations(conn: &Connection) -> Result<Vec<String>> {
 }
 
 /// All referenced blobs (objects and parts) for full verification and backup.
-pub fn referenced_blobs(conn: &Connection) -> Result<Vec<(StorageId, BlobArea, u64, [u8; 32])>> {
+/// (storage ID, area, size, internal SHA-256) of a referenced blob.
+pub type ReferencedBlob = (StorageId, BlobArea, u64, [u8; 32]);
+
+pub fn referenced_blobs(conn: &Connection) -> Result<Vec<ReferencedBlob>> {
     let mut stmt = conn.prepare(
         "SELECT b.storage_id, b.area, b.size_bytes, b.sha256 FROM blobs b
          WHERE b.state = 'ready' AND (EXISTS (SELECT 1 FROM objects o WHERE o.storage_id = b.storage_id)
@@ -1274,20 +1362,34 @@ mod tests {
     #[test]
     fn overwrite_updates_counters_and_garbage() {
         let (_d, conn) = db();
-        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else { panic!() };
+        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else {
+            panic!()
+        };
         let n1 = new_object(b, b"k", 100, &conn);
         let r = commit_object(&conn, &n1, &WriteConditions::default(), 5).unwrap();
         assert!(matches!(r, ObjectCommit::Committed { replaced: None, .. }));
         let n2 = new_object(b, b"k", 40, &conn);
         let r = commit_object(&conn, &n2, &WriteConditions::default(), 5).unwrap();
-        assert!(matches!(r, ObjectCommit::Committed { replaced: Some((_, 100)), .. }));
+        assert!(matches!(
+            r,
+            ObjectCommit::Committed {
+                replaced: Some((_, 100)),
+                ..
+            }
+        ));
         let row = bucket_by_id(&conn, &b).unwrap().unwrap();
         assert_eq!((row.object_count, row.logical_bytes), (1, 40));
-        assert_eq!(blob_state(&conn, &n1.blob.storage_id).unwrap().as_deref(), Some("garbage"));
+        assert_eq!(
+            blob_state(&conn, &n1.blob.storage_id).unwrap().as_deref(),
+            Some("garbage")
+        );
         assert!(invariant_violations(&conn).unwrap().is_empty());
         let d = delete_object(&conn, &b, b"k", 5).unwrap();
         assert!(matches!(d, DeleteOutcome::Deleted { size: 40, .. }));
-        assert_eq!(delete_object(&conn, &b, b"k", 5).unwrap(), DeleteOutcome::Absent);
+        assert_eq!(
+            delete_object(&conn, &b, b"k", 5).unwrap(),
+            DeleteOutcome::Absent
+        );
         let row = bucket_by_id(&conn, &b).unwrap().unwrap();
         assert_eq!((row.object_count, row.logical_bytes), (0, 0));
         assert!(invariant_violations(&conn).unwrap().is_empty());
@@ -1296,20 +1398,46 @@ mod tests {
     #[test]
     fn conditions_and_quota_are_checked_at_commit() {
         let (_d, conn) = db();
-        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else { panic!() };
-        let cond = WriteConditions { if_match: Some(vec!["x".into()]), ..Default::default() };
+        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else {
+            panic!()
+        };
+        let cond = WriteConditions {
+            if_match: Some(vec!["x".into()]),
+            ..Default::default()
+        };
         let n = new_object(b, b"k", 1, &conn);
-        assert_eq!(commit_object(&conn, &n, &cond, 5).unwrap(), ObjectCommit::NoSuchKey);
+        assert_eq!(
+            commit_object(&conn, &n, &cond, 5).unwrap(),
+            ObjectCommit::NoSuchKey
+        );
         commit_object(&conn, &n, &WriteConditions::default(), 5).unwrap();
         let n2 = new_object(b, b"k", 1, &conn);
-        let none = WriteConditions { if_none_match_any: true, ..Default::default() };
-        assert_eq!(commit_object(&conn, &n2, &none, 5).unwrap(), ObjectCommit::PreconditionFailed);
-        assert_eq!(commit_object(&conn, &n2, &cond, 5).unwrap(), ObjectCommit::PreconditionFailed);
-        let ok = WriteConditions { if_match: Some(vec!["etag1".into()]), ..Default::default() };
-        assert!(matches!(commit_object(&conn, &n2, &ok, 5).unwrap(), ObjectCommit::Committed { .. }));
+        let none = WriteConditions {
+            if_none_match_any: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            commit_object(&conn, &n2, &none, 5).unwrap(),
+            ObjectCommit::PreconditionFailed
+        );
+        assert_eq!(
+            commit_object(&conn, &n2, &cond, 5).unwrap(),
+            ObjectCommit::PreconditionFailed
+        );
+        let ok = WriteConditions {
+            if_match: Some(vec!["etag1".into()]),
+            ..Default::default()
+        };
+        assert!(matches!(
+            commit_object(&conn, &n2, &ok, 5).unwrap(),
+            ObjectCommit::Committed { .. }
+        ));
         set_bucket_quota(&conn, "docs", Some(10)).unwrap();
         let big = new_object(b, b"other", 20, &conn);
-        assert_eq!(commit_object(&conn, &big, &WriteConditions::default(), 5).unwrap(), ObjectCommit::QuotaExceeded);
+        assert_eq!(
+            commit_object(&conn, &big, &WriteConditions::default(), 5).unwrap(),
+            ObjectCommit::QuotaExceeded
+        );
         // Shrinking or same-size overwrites are always allowed.
         set_bucket_quota(&conn, "docs", Some(0)).unwrap();
         let small = new_object(b, b"k", 1, &conn);
@@ -1322,21 +1450,34 @@ mod tests {
     #[test]
     fn bucket_deletion_requires_empty() {
         let (_d, conn) = db();
-        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else { panic!() };
-        assert_eq!(create_bucket(&conn, "docs", 1, 10).unwrap(), CreateBucket::AlreadyExists);
-        assert_eq!(create_bucket(&conn, "other", 1, 1).unwrap(), CreateBucket::TooManyBuckets);
+        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            create_bucket(&conn, "docs", 1, 10).unwrap(),
+            CreateBucket::AlreadyExists
+        );
+        assert_eq!(
+            create_bucket(&conn, "other", 1, 1).unwrap(),
+            CreateBucket::TooManyBuckets
+        );
         let n = new_object(b, b"k", 1, &conn);
         commit_object(&conn, &n, &WriteConditions::default(), 5).unwrap();
         assert_eq!(delete_bucket(&conn, &b).unwrap(), DeleteBucket::NotEmpty);
         delete_object(&conn, &b, b"k", 5).unwrap();
         assert_eq!(delete_bucket(&conn, &b).unwrap(), DeleteBucket::Deleted);
-        assert_eq!(delete_bucket(&conn, &b).unwrap(), DeleteBucket::NoSuchBucket);
+        assert_eq!(
+            delete_bucket(&conn, &b).unwrap(),
+            DeleteBucket::NoSuchBucket
+        );
     }
 
     #[test]
     fn recovery_reclaims_writing_and_reopens_completing() {
         let (_d, conn) = db();
-        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else { panic!() };
+        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else {
+            panic!()
+        };
         let up = UploadRow {
             upload_id: crate::ids::UploadId::random().to_string(),
             bucket_id: b,
@@ -1354,7 +1495,10 @@ mod tests {
             result_json: None,
             receipt_expires_at_ms: None,
         };
-        assert_eq!(create_upload(&conn, &up, 10).unwrap(), CreateUpload::Created);
+        assert_eq!(
+            create_upload(&conn, &up, 10).unwrap(),
+            CreateUpload::Created
+        );
         let out = StorageId::random();
         assert_eq!(
             begin_completion(&conn, &up.upload_id, &[0; 32], "[]", &out, 2).unwrap(),
@@ -1365,7 +1509,10 @@ mod tests {
         let r = recover(&conn, 3).unwrap();
         assert_eq!(r.reopened_uploads, 1);
         assert_eq!(r.reclaimed_writing_blobs, 2);
-        assert_eq!(get_upload(&conn, &up.upload_id).unwrap().unwrap().state, UploadState::Open);
+        assert_eq!(
+            get_upload(&conn, &up.upload_id).unwrap().unwrap().state,
+            UploadState::Open
+        );
         assert_eq!(blob_state(&conn, &out).unwrap().as_deref(), Some("garbage"));
         assert_eq!(garbage_batch(&conn, 3, 10).unwrap().len(), 2);
         assert!(delete_garbage_row(&conn, &out).unwrap());
@@ -1374,9 +1521,22 @@ mod tests {
     #[test]
     fn byte_ordering_matches_reference_model() {
         let (_d, conn) = db();
-        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else { panic!() };
+        let CreateBucket::Created(b) = create_bucket(&conn, "docs", 1, 10).unwrap() else {
+            panic!()
+        };
         let keys: Vec<&str> = vec![
-            "a", "a/b", "a b", "A", "é", "e\u{0301}", "~", "a%", "a_", "z", "\u{10348}", "a\tb",
+            "a",
+            "a/b",
+            "a b",
+            "A",
+            "é",
+            "e\u{0301}",
+            "~",
+            "a%",
+            "a_",
+            "z",
+            "\u{10348}",
+            "a\tb",
         ];
         for k in &keys {
             let n = new_object(b, k.as_bytes(), 1, &conn);

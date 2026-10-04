@@ -23,8 +23,15 @@ const MAX_TRAILER_LINES: usize = 8;
 
 enum State {
     Header,
-    Data { remaining: u64, hasher: Option<Sha256>, signature: Option<String> },
-    DataCrlf { hasher: Option<Sha256>, signature: Option<String> },
+    Data {
+        remaining: u64,
+        hasher: Option<Sha256>,
+        signature: Option<String>,
+    },
+    DataCrlf {
+        hasher: Option<Sha256>,
+        signature: Option<String>,
+    },
     FinalCrlf,
     Trailers,
     Done,
@@ -63,7 +70,10 @@ impl Payload {
         idle: Duration,
     ) -> Self {
         let sha = matches!(mode, PayloadDecl::Sha256(_)).then(Sha256::new);
-        let prev_sig = signing.as_ref().map(|s| s.seed_signature.clone()).unwrap_or_default();
+        let prev_sig = signing
+            .as_ref()
+            .map(|s| s.seed_signature.clone())
+            .unwrap_or_default();
         let overhead_budget = 64 * 1024 + expected_len.unwrap_or(0) / 8;
         Self {
             body,
@@ -98,8 +108,7 @@ impl Payload {
     /// Collect a small body (XML/config) with a hard size limit.
     pub async fn collect(&mut self, limit: usize) -> S3Result<Bytes> {
         if self.expected_len.is_some_and(|l| l > limit as u64) {
-            return Err(S3Error::entity_too_large()
-                .with_detail("control body exceeds limit"));
+            return Err(S3Error::entity_too_large().with_detail("control body exceeds limit"));
         }
         let mut out = BytesMut::new();
         while let Some(chunk) = self.next_chunk().await? {
@@ -122,7 +131,9 @@ impl Payload {
                 return Ok(None);
             }
             Ok(Some(Err(e))) => {
-                return Err(S3Error::incomplete_body().with_detail(format!("body read failed: {e}")));
+                return Err(
+                    S3Error::incomplete_body().with_detail(format!("body read failed: {e}"))
+                );
             }
             Ok(Some(Ok(f))) => f,
         };
@@ -167,7 +178,9 @@ impl Payload {
     fn charge_overhead(&mut self, n: usize) -> S3Result<()> {
         self.overhead += n as u64;
         if self.overhead > self.overhead_budget {
-            return Err(S3Error::invalid_request("aws-chunked framing overhead exceeds the allowed bound"));
+            return Err(S3Error::invalid_request(
+                "aws-chunked framing overhead exceeds the allowed bound",
+            ));
         }
         Ok(())
     }
@@ -192,12 +205,16 @@ impl Payload {
     }
 
     fn signed(&self) -> bool {
-        matches!(self.mode, PayloadDecl::StreamingSigned | PayloadDecl::StreamingSignedTrailer)
+        matches!(
+            self.mode,
+            PayloadDecl::StreamingSigned | PayloadDecl::StreamingSignedTrailer
+        )
     }
 
     fn verify_chunk_signature(&mut self, chunk_sha_hex: &str, provided: &str) -> S3Result<()> {
         let ctx = self.signing.as_ref().ok_or_else(S3Error::internal)?;
-        let sts = sigv4::chunk_string_to_sign(&ctx.amz_date, &ctx.scope, &self.prev_sig, chunk_sha_hex);
+        let sts =
+            sigv4::chunk_string_to_sign(&ctx.amz_date, &ctx.scope, &self.prev_sig, chunk_sha_hex);
         let mac = sigv4::hmac(&ctx.key, sts.as_bytes());
         if !sigv4::signature_eq(&mac, provided) {
             return Err(S3Error::signature_does_not_match().with_detail("chunk signature mismatch"));
@@ -211,16 +228,22 @@ impl Payload {
             Some((s, e)) => (s, Some(e)),
             None => (line, None),
         };
-        if size_hex.is_empty() || size_hex.len() > 16 || !size_hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if size_hex.is_empty()
+            || size_hex.len() > 16
+            || !size_hex.bytes().all(|b| b.is_ascii_hexdigit())
+        {
             return Err(S3Error::invalid_request("invalid aws-chunked chunk size"));
         }
-        let size = u64::from_str_radix(size_hex, 16).map_err(|_| S3Error::invalid_request("invalid chunk size"))?;
+        let size = u64::from_str_radix(size_hex, 16)
+            .map_err(|_| S3Error::invalid_request("invalid chunk size"))?;
         let signature = if self.signed() {
             let sig = ext
                 .and_then(|e| e.strip_prefix("chunk-signature="))
                 .ok_or_else(|| S3Error::invalid_request("missing chunk-signature"))?;
             if sig.len() != 64 {
-                return Err(S3Error::signature_does_not_match().with_detail("malformed chunk signature"));
+                return Err(
+                    S3Error::signature_does_not_match().with_detail("malformed chunk signature")
+                );
             }
             Some(sig.to_string())
         } else {
@@ -234,14 +257,20 @@ impl Payload {
             .checked_add(size)
             .ok_or_else(|| S3Error::invalid_request("chunk size overflow"))?;
         if self.expected_len.is_some_and(|e| total > e) {
-            return Err(S3Error::invalid_request("chunked body exceeds x-amz-decoded-content-length"));
+            return Err(S3Error::invalid_request(
+                "chunked body exceeds x-amz-decoded-content-length",
+            ));
         }
         if size == 0 {
             if let Some(sig) = &signature {
                 let sig = sig.clone();
                 self.verify_chunk_signature(sigv4::EMPTY_SHA256, &sig)?;
             }
-            self.state = if self.mode.has_trailer() { State::Trailers } else { State::FinalCrlf };
+            self.state = if self.mode.has_trailer() {
+                State::Trailers
+            } else {
+                State::FinalCrlf
+            };
         } else {
             let hasher = signature.as_ref().map(|_| Sha256::new());
             self.state = State::Data {
@@ -254,10 +283,9 @@ impl Payload {
     }
 
     fn finish_trailers(&mut self) -> S3Result<()> {
-        let declared = self
-            .trailer_name
-            .clone()
-            .ok_or_else(|| S3Error::invalid_request("x-amz-trailer header is required for trailer payloads"))?;
+        let declared = self.trailer_name.clone().ok_or_else(|| {
+            S3Error::invalid_request("x-amz-trailer header is required for trailer payloads")
+        })?;
         let names: Vec<&str> = self.trailer_lines.iter().map(|(k, _)| k.as_str()).collect();
         if names != [declared.as_str()] {
             return Err(S3Error::invalid_request(
@@ -279,14 +307,18 @@ impl Payload {
                     &sigv4::sha256_hex(canonical.as_bytes()),
                 );
                 if !sigv4::signature_eq(&sigv4::hmac(&ctx.key, sts.as_bytes()), &sig) {
-                    return Err(S3Error::signature_does_not_match().with_detail("trailer signature mismatch"));
+                    return Err(S3Error::signature_does_not_match()
+                        .with_detail("trailer signature mismatch"));
                 }
             }
             (PayloadDecl::StreamingSignedTrailer, None) => {
-                return Err(S3Error::signature_does_not_match().with_detail("missing x-amz-trailer-signature"));
+                return Err(S3Error::signature_does_not_match()
+                    .with_detail("missing x-amz-trailer-signature"));
             }
             (_, Some(_)) => {
-                return Err(S3Error::invalid_request("unexpected trailer signature on an unsigned payload"));
+                return Err(S3Error::invalid_request(
+                    "unexpected trailer signature on an unsigned payload",
+                ));
             }
             _ => {}
         }
@@ -298,13 +330,17 @@ impl Payload {
             match &mut self.state {
                 State::Done => {
                     if !self.raw.is_empty() {
-                        return Err(S3Error::invalid_request("data after the final aws-chunked frame"));
+                        return Err(S3Error::invalid_request(
+                            "data after the final aws-chunked frame",
+                        ));
                     }
                     // The input must end here.
                     if let Some(extra) = self.read_frame().await?
                         && !extra.is_empty()
                     {
-                        return Err(S3Error::invalid_request("data after the final aws-chunked frame"));
+                        return Err(S3Error::invalid_request(
+                            "data after the final aws-chunked frame",
+                        ));
                     }
                     if !self.input_done {
                         continue;
@@ -315,7 +351,9 @@ impl Payload {
                     self.finished = true;
                     return Ok(None);
                 }
-                State::Data { remaining, hasher, .. } if !self.raw.is_empty() => {
+                State::Data {
+                    remaining, hasher, ..
+                } if !self.raw.is_empty() => {
                     let n = (*remaining).min(self.raw.len() as u64) as usize;
                     let data = self.raw.split_to(n).freeze();
                     if let Some(h) = hasher.as_mut() {
@@ -323,8 +361,9 @@ impl Payload {
                     }
                     *remaining -= n as u64;
                     if *remaining == 0
-                        && let State::Data { hasher, signature, .. } =
-                            std::mem::replace(&mut self.state, State::Header)
+                        && let State::Data {
+                            hasher, signature, ..
+                        } = std::mem::replace(&mut self.state, State::Header)
                     {
                         self.state = State::DataCrlf { hasher, signature };
                     }
@@ -337,7 +376,8 @@ impl Payload {
                     }
                     self.raw.advance(2);
                     self.charge_overhead(2)?;
-                    if let State::DataCrlf { hasher, signature } = std::mem::replace(&mut self.state, State::Header)
+                    if let State::DataCrlf { hasher, signature } =
+                        std::mem::replace(&mut self.state, State::Header)
                         && let (Some(h), Some(sig)) = (hasher, signature)
                     {
                         let hexsum = hex::encode(h.finalize());
@@ -367,7 +407,9 @@ impl Payload {
                             self.state = State::Done;
                             continue;
                         }
-                        if self.trailer_lines.len() + usize::from(self.trailer_signature.is_some()) >= MAX_TRAILER_LINES {
+                        if self.trailer_lines.len() + usize::from(self.trailer_signature.is_some())
+                            >= MAX_TRAILER_LINES
+                        {
                             return Err(S3Error::invalid_request("too many trailing headers"));
                         }
                         let (k, v) = line
@@ -376,7 +418,9 @@ impl Payload {
                         let k = k.trim().to_ascii_lowercase();
                         let v = v.trim().to_string();
                         if self.trailer_signature.is_some() {
-                            return Err(S3Error::invalid_request("trailing header after trailer signature"));
+                            return Err(S3Error::invalid_request(
+                                "trailing header after trailer signature",
+                            ));
                         }
                         if k == "x-amz-trailer-signature" {
                             self.trailer_signature = Some(v);
@@ -394,7 +438,11 @@ impl Payload {
             // Need more input.
             match self.read_frame().await? {
                 Some(data) => self.raw.extend_from_slice(&data),
-                None => return Err(S3Error::incomplete_body().with_detail("aws-chunked body ended early")),
+                None => {
+                    return Err(
+                        S3Error::incomplete_body().with_detail("aws-chunked body ended early")
+                    );
+                }
             }
         }
     }
@@ -419,7 +467,12 @@ mod tests {
 
     fn ctx(seed: &str) -> SigningCtx {
         SigningCtx {
-            key: sigv4::signing_key("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "20130524", "us-east-1", "s3"),
+            key: sigv4::signing_key(
+                "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                "20130524",
+                "us-east-1",
+                "s3",
+            ),
             amz_date: "20130524T000000Z".into(),
             scope: "20130524/us-east-1/s3/aws4_request".into(),
             seed_signature: seed.into(),
@@ -427,7 +480,11 @@ mod tests {
     }
 
     fn body_from_parts(parts: Vec<Vec<u8>>) -> Body {
-        let stream = futures_util::stream::iter(parts.into_iter().map(|p| Ok::<_, std::io::Error>(Bytes::from(p))));
+        let stream = futures_util::stream::iter(
+            parts
+                .into_iter()
+                .map(|p| Ok::<_, std::io::Error>(Bytes::from(p))),
+        );
         Body::from_stream(stream)
     }
 
@@ -456,7 +513,9 @@ mod tests {
         Payload::new(
             body_from_parts(parts),
             PayloadDecl::StreamingSignedTrailer,
-            Some(ctx("106e2a8a18243abcf37539882f36619c00e2dfc72633413f02d3b74544bfeb8e")),
+            Some(ctx(
+                "106e2a8a18243abcf37539882f36619c00e2dfc72633413f02d3b74544bfeb8e",
+            )),
             Some(66560),
             Some("x-amz-checksum-crc32c".into()),
             Duration::from_secs(5),
@@ -470,7 +529,10 @@ mod tests {
             let data = drain(&mut p).await.unwrap();
             assert_eq!(data.len(), 66560);
             assert!(data.iter().all(|b| *b == b'a'));
-            assert_eq!(p.trailers(), &[("x-amz-checksum-crc32c".to_string(), "sOO8/Q==".to_string())]);
+            assert_eq!(
+                p.trailers(),
+                &[("x-amz-checksum-crc32c".to_string(), "sOO8/Q==".to_string())]
+            );
         }
     }
 
@@ -479,19 +541,33 @@ mod tests {
         let mut body = aws_trailer_body();
         let i = 200;
         body[i] = b'b';
-        assert!(drain(&mut signed_trailer_payload(body, 8192)).await.is_err());
+        assert!(
+            drain(&mut signed_trailer_payload(body, 8192))
+                .await
+                .is_err()
+        );
         let body = String::from_utf8(aws_trailer_body())
             .unwrap()
             .replace("sOO8/Q==", "AAAAAA==")
             .into_bytes();
-        let err = drain(&mut signed_trailer_payload(body, 8192)).await.unwrap_err();
+        let err = drain(&mut signed_trailer_payload(body, 8192))
+            .await
+            .unwrap_err();
         assert_eq!(err.code, "SignatureDoesNotMatch");
         let mut body = aws_trailer_body();
         body.extend_from_slice(b"junk");
-        assert!(drain(&mut signed_trailer_payload(body, 8192)).await.is_err());
+        assert!(
+            drain(&mut signed_trailer_payload(body, 8192))
+                .await
+                .is_err()
+        );
         let body = aws_trailer_body();
         let truncated = body[..body.len() - 2].to_vec();
-        assert!(drain(&mut signed_trailer_payload(truncated, 8192)).await.is_err());
+        assert!(
+            drain(&mut signed_trailer_payload(truncated, 8192))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -504,7 +580,8 @@ mod tests {
 
     #[tokio::test]
     async fn unsigned_trailer_mode() {
-        let body = b"5\r\nhello\r\n6\r\n world\r\n0\r\nx-amz-checksum-crc32:DUoRhQ==\r\n\r\n".to_vec();
+        let body =
+            b"5\r\nhello\r\n6\r\n world\r\n0\r\nx-amz-checksum-crc32:DUoRhQ==\r\n\r\n".to_vec();
         let mut p = Payload::new(
             body_from_parts(vec![body]),
             PayloadDecl::StreamingUnsignedTrailer,
@@ -548,7 +625,10 @@ mod tests {
             None,
             Duration::from_secs(5),
         );
-        assert_eq!(drain(&mut p).await.unwrap_err().code, "XAmzContentSHA256Mismatch");
+        assert_eq!(
+            drain(&mut p).await.unwrap_err().code,
+            "XAmzContentSHA256Mismatch"
+        );
     }
 
     #[tokio::test]

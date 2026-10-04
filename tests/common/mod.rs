@@ -87,7 +87,8 @@ level = "warn"
     let creds = dir.join("credentials.toml");
     if !creds.exists() {
         std::fs::write(&creds, CREDENTIALS).unwrap();
-        std::fs::set_permissions(&creds, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&creds, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .unwrap();
     }
     path
 }
@@ -161,13 +162,17 @@ impl TestServer {
 /// Plain unsigned request (CORS preflight, anonymous probes).
 pub async fn raw(method: &str, url: &str, headers: &[(&str, &str)], body: Vec<u8>) -> Resp {
     let client: hyper_util::client::legacy::Client<_, http_body_util::Full<bytes::Bytes>> =
-        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build_http();
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+            .build_http();
     let mut rb = http::Request::builder().method(method).uri(url);
     for (k, v) in headers {
         rb = rb.header(*k, *v);
     }
     let resp = client
-        .request(rb.body(http_body_util::Full::new(bytes::Bytes::from(body))).unwrap())
+        .request(
+            rb.body(http_body_util::Full::new(bytes::Bytes::from(body)))
+                .unwrap(),
+        )
         .await
         .unwrap();
     let status = resp.status().as_u16();
@@ -176,7 +181,11 @@ pub async fn raw(method: &str, url: &str, headers: &[(&str, &str)], body: Vec<u8
         .await
         .map(|b| b.to_bytes().to_vec())
         .unwrap_or_default();
-    Resp { status, headers, body }
+    Resp {
+        status,
+        headers,
+        body,
+    }
 }
 
 pub fn now_amz() -> (String, String) {
@@ -194,7 +203,10 @@ pub fn amz_at(secs: i64) -> (String, String) {
 }
 
 pub fn unix_now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
 }
 
 /// Encode a key the way AWS SDKs do: every byte except unreserved and `/`.
@@ -251,7 +263,9 @@ impl Resp {
     }
 
     pub fn header(&self, name: &str) -> Option<String> {
-        self.headers.get(name).map(|v| v.to_str().unwrap_or("").to_string())
+        self.headers
+            .get(name)
+            .map(|v| v.to_str().unwrap_or("").to_string())
     }
 
     pub fn code(&self) -> String {
@@ -271,7 +285,13 @@ impl Resp {
         t.split(&open)
             .skip(1)
             .filter_map(|r| r.split(&close).next())
-            .map(|s| s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'"))
+            .map(|s| {
+                s.replace("&amp;", "&")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&quot;", "\"")
+                    .replace("&apos;", "'")
+            })
             .collect()
     }
 
@@ -316,13 +336,25 @@ impl Client {
             })
             .collect();
         pairs.sort();
-        pairs.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&")
+        pairs
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join("&")
     }
 
     /// Sign and send. `path` is already encoded; `query` is an encoded query.
-    pub async fn send(&self, method: &str, path: &str, query: &str, headers: &[(&str, &str)], payload: Payload) -> Resp {
+    pub async fn send(
+        &self,
+        method: &str,
+        path: &str,
+        query: &str,
+        headers: &[(&str, &str)],
+        payload: Payload,
+    ) -> Resp {
         let (date, amz) = now_amz();
-        self.send_at(method, path, query, headers, payload, &date, &amz).await
+        self.send_at(method, path, query, headers, payload, &date, &amz)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -337,7 +369,10 @@ impl Client {
         amz: &str,
     ) -> Resp {
         let scope = format!("{date}/{}/s3/aws4_request", self.region);
-        let mut h: Vec<(String, String)> = headers.iter().map(|(k, v)| (k.to_lowercase(), v.to_string())).collect();
+        let mut h: Vec<(String, String)> = headers
+            .iter()
+            .map(|(k, v)| (k.to_lowercase(), v.to_string()))
+            .collect();
         h.push(("host".into(), self.host.clone()));
         h.push(("x-amz-date".into(), amz.to_string()));
         let (content_sha, body_len, decoded_len) = match &payload {
@@ -369,7 +404,9 @@ impl Client {
         if let Some(d) = decoded_len {
             h.push(("x-amz-decoded-content-length".into(), d.to_string()));
             h.push(("content-encoding".into(), "aws-chunked".into()));
-            if let Payload::StreamingSignedTrailer(_, _, n, _) | Payload::StreamingUnsignedTrailer(_, _, n, _) = &payload {
+            if let Payload::StreamingSignedTrailer(_, _, n, _)
+            | Payload::StreamingUnsignedTrailer(_, _, n, _) = &payload
+            {
                 h.push(("x-amz-trailer".into(), n.clone()));
             }
         }
@@ -381,7 +418,11 @@ impl Client {
         let block: String = signed_dedup
             .iter()
             .map(|k| {
-                let vals: Vec<&str> = h.iter().filter(|(n, _)| n == k).map(|(_, v)| v.trim()).collect();
+                let vals: Vec<&str> = h
+                    .iter()
+                    .filter(|(n, _)| n == k)
+                    .map(|(_, v)| v.trim())
+                    .collect();
                 format!("{k}:{}\n", vals.join(","))
             })
             .collect();
@@ -390,7 +431,10 @@ impl Client {
             "{method}\n{path}\n{}\n{block}\n{signed_str}\n{content_sha}",
             Self::canonical_query(query)
         );
-        let sts = format!("AWS4-HMAC-SHA256\n{amz}\n{scope}\n{}", sha_hex(cr.as_bytes()));
+        let sts = format!(
+            "AWS4-HMAC-SHA256\n{amz}\n{scope}\n{}",
+            sha_hex(cr.as_bytes())
+        );
         let key = sigv4::signing_key(&self.secret, date, &self.region, "s3");
         let seed = hex::encode(sigv4::hmac(&key, sts.as_bytes()));
         let auth = format!(
@@ -399,11 +443,15 @@ impl Client {
         );
         let body = match &payload {
             Payload::Signed(b) | Payload::Unsigned(b) => b.clone(),
-            Payload::StreamingSigned(b, c) => encode_chunks(b, *c, Some((&key, amz, &scope, &seed)), None),
+            Payload::StreamingSigned(b, c) => {
+                encode_chunks(b, *c, Some((&key, amz, &scope, &seed)), None)
+            }
             Payload::StreamingSignedTrailer(b, c, n, v) => {
                 encode_chunks(b, *c, Some((&key, amz, &scope, &seed)), Some((n, v)))
             }
-            Payload::StreamingUnsignedTrailer(b, c, n, v) => encode_chunks(b, *c, None, Some((n, v))),
+            Payload::StreamingUnsignedTrailer(b, c, n, v) => {
+                encode_chunks(b, *c, None, Some((n, v)))
+            }
         };
         let url = if query.is_empty() {
             format!("{}{path}", self.base)
@@ -418,7 +466,9 @@ impl Client {
             rb = rb.header(k.as_str(), v.as_str());
         }
         rb = rb.header("authorization", auth);
-        let req = rb.body(http_body_util::Full::new(bytes::Bytes::from(body))).unwrap();
+        let req = rb
+            .body(http_body_util::Full::new(bytes::Bytes::from(body)))
+            .unwrap();
         let resp = match self.http.request(req).await {
             Ok(r) => r,
             // The server may reject early and close while the body is still
@@ -437,42 +487,63 @@ impl Client {
             .await
             .map(|b| b.to_bytes().to_vec())
             .unwrap_or_default();
-        Resp { status, headers, body }
+        Resp {
+            status,
+            headers,
+            body,
+        }
     }
 
     pub async fn get(&self, path: &str, query: &str) -> Resp {
-        self.send("GET", path, query, &[], Payload::Signed(vec![])).await
+        self.send("GET", path, query, &[], Payload::Signed(vec![]))
+            .await
     }
 
     pub async fn put(&self, path: &str, body: &[u8]) -> Resp {
-        self.send("PUT", path, "", &[], Payload::Signed(body.to_vec())).await
+        self.send("PUT", path, "", &[], Payload::Signed(body.to_vec()))
+            .await
     }
 
     pub async fn put_h(&self, path: &str, headers: &[(&str, &str)], body: &[u8]) -> Resp {
-        self.send("PUT", path, "", headers, Payload::Signed(body.to_vec())).await
+        self.send("PUT", path, "", headers, Payload::Signed(body.to_vec()))
+            .await
     }
 
     pub async fn head(&self, path: &str) -> Resp {
-        self.send("HEAD", path, "", &[], Payload::Signed(vec![])).await
+        self.send("HEAD", path, "", &[], Payload::Signed(vec![]))
+            .await
     }
 
     pub async fn delete(&self, path: &str) -> Resp {
-        self.send("DELETE", path, "", &[], Payload::Signed(vec![])).await
+        self.send("DELETE", path, "", &[], Payload::Signed(vec![]))
+            .await
     }
 
     pub async fn create_bucket(&self, name: &str) -> Resp {
-        self.send("PUT", &format!("/{name}"), "", &[], Payload::Signed(vec![])).await
+        self.send("PUT", &format!("/{name}"), "", &[], Payload::Signed(vec![]))
+            .await
     }
 
     /// Header-signed request head with UNSIGNED-PAYLOAD, for driving a slow
     /// body over a raw TCP stream. Returns the full HTTP/1.1 request head.
-    pub fn signed_head_unsigned_payload(&self, method: &str, path: &str, content_length: usize) -> String {
+    pub fn signed_head_unsigned_payload(
+        &self,
+        method: &str,
+        path: &str,
+        content_length: usize,
+    ) -> String {
         let (date, amz) = now_amz();
         let scope = format!("{date}/{}/s3/aws4_request", self.region);
-        let block = format!("host:{}\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:{amz}\n", self.host);
+        let block = format!(
+            "host:{}\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:{amz}\n",
+            self.host
+        );
         let signed = "host;x-amz-content-sha256;x-amz-date";
         let cr = format!("{method}\n{path}\n\n{block}\n{signed}\nUNSIGNED-PAYLOAD");
-        let sts = format!("AWS4-HMAC-SHA256\n{amz}\n{scope}\n{}", sha_hex(cr.as_bytes()));
+        let sts = format!(
+            "AWS4-HMAC-SHA256\n{amz}\n{scope}\n{}",
+            sha_hex(cr.as_bytes())
+        );
         let key = sigv4::signing_key(&self.secret, &date, &self.region, "s3");
         let sig = hex::encode(sigv4::hmac(&key, sts.as_bytes()));
         format!(
@@ -497,14 +568,22 @@ impl Client {
             Self::canonical_query(&query),
             self.host
         );
-        let sts = format!("AWS4-HMAC-SHA256\n{amz}\n{scope}\n{}", sha_hex(cr.as_bytes()));
+        let sts = format!(
+            "AWS4-HMAC-SHA256\n{amz}\n{scope}\n{}",
+            sha_hex(cr.as_bytes())
+        );
         let key = sigv4::signing_key(&self.secret, &date, &self.region, "s3");
         let sig = hex::encode(sigv4::hmac(&key, sts.as_bytes()));
         format!("{}{path}?{query}&X-Amz-Signature={sig}", self.base)
     }
 }
 
-fn chunked_len(len: usize, chunk: usize, signed: bool, trailer: Option<(&String, &String, bool)>) -> usize {
+fn chunked_len(
+    len: usize,
+    chunk: usize,
+    signed: bool,
+    trailer: Option<(&String, &String, bool)>,
+) -> usize {
     encode_chunks(
         &vec![0u8; len],
         chunk,
@@ -552,7 +631,8 @@ pub fn encode_chunks(
                 let canon = format!("{n}:{v}\n");
                 let s = hex::encode(sigv4::hmac(
                     key,
-                    sigv4::trailer_string_to_sign(amz, scope, &prev, &sha_hex(canon.as_bytes())).as_bytes(),
+                    sigv4::trailer_string_to_sign(amz, scope, &prev, &sha_hex(canon.as_bytes()))
+                        .as_bytes(),
                 ));
                 out.extend_from_slice(format!("x-amz-trailer-signature:{s}\r\n").as_bytes());
             }

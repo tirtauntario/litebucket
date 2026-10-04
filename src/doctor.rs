@@ -25,11 +25,22 @@ pub fn doctor(cfg: &Config, full: bool) -> Result<bool> {
     let (data, conn, meta, _) = open_offline(cfg, false)?;
     let mut problems: Vec<String> = Vec::new();
     println!("storlite {}", env!("CARGO_PKG_VERSION"));
-    println!("sqlite {} ({})", metadata::sqlite_version(), metadata::sqlite_source_id());
+    println!(
+        "sqlite {} ({})",
+        metadata::sqlite_version(),
+        metadata::sqlite_source_id()
+    );
     println!("data directory: {}", data.root().display());
-    println!("store id: {}  region: {}  format: {}", meta.store_id, meta.region, meta.format_version);
+    println!(
+        "store id: {}  region: {}  format: {}",
+        meta.store_id, meta.region, meta.format_version
+    );
     let applied = migrations::verify(&conn)?;
-    println!("migrations applied: {:?} (latest known {})", applied, migrations::latest_version());
+    println!(
+        "migrations applied: {:?} (latest known {})",
+        applied,
+        migrations::latest_version()
+    );
     if applied.last().copied().unwrap_or(0) < migrations::latest_version() {
         println!("note: migrations pending; they are applied by `serve`");
     }
@@ -56,19 +67,30 @@ pub fn doctor(cfg: &Config, full: bool) -> Result<bool> {
     for st in ["writing", "ready", "garbage"] {
         println!(
             "blobs {st}: {}",
-            count(&conn, &format!("SELECT count(*) FROM blobs WHERE state = '{st}'"))?
+            count(
+                &conn,
+                &format!("SELECT count(*) FROM blobs WHERE state = '{st}'")
+            )?
         );
     }
     for st in ["open", "completing", "completed", "aborted"] {
         println!(
             "multipart uploads {st}: {}",
-            count(&conn, &format!("SELECT count(*) FROM multipart_uploads WHERE state = '{st}'"))?
+            count(
+                &conn,
+                &format!("SELECT count(*) FROM multipart_uploads WHERE state = '{st}'")
+            )?
         );
     }
     let writing = count(&conn, "SELECT count(*) FROM blobs WHERE state = 'writing'")?;
-    let completing = count(&conn, "SELECT count(*) FROM multipart_uploads WHERE state = 'completing'")?;
+    let completing = count(
+        &conn,
+        "SELECT count(*) FROM multipart_uploads WHERE state = 'completing'",
+    )?;
     if writing + completing > 0 {
-        println!("pending recovery: {writing} WRITING blobs, {completing} COMPLETING uploads (handled at next start or `gc --apply`)");
+        println!(
+            "pending recovery: {writing} WRITING blobs, {completing} COMPLETING uploads (handled at next start or `gc --apply`)"
+        );
     }
     if let Ok(st) = data.fs_stats() {
         println!(
@@ -120,7 +142,10 @@ fn verify_files(data: &DataDir, conn: &Connection, problems: &mut Vec<String>) -
                     problems.push(format!("{} {id}: SHA-256 mismatch", area.as_str()));
                 }
             }
-            Err(e) => problems.push(format!("{} {id}: cannot open referenced file: {e}", area.as_str())),
+            Err(e) => problems.push(format!(
+                "{} {id}: cannot open referenced file: {e}",
+                area.as_str()
+            )),
         }
         checked += 1;
     }
@@ -154,7 +179,11 @@ fn verify_files(data: &DataDir, conn: &Connection, problems: &mut Vec<String>) -
                 for f in std::fs::read_dir(l2.path())? {
                     let f = f?;
                     let name = f.file_name().to_string_lossy().into_owned();
-                    let base = if area == Area::Staging { name.strip_suffix(".tmp") } else { Some(name.as_str()) };
+                    let base = if area == Area::Staging {
+                        name.strip_suffix(".tmp")
+                    } else {
+                        Some(name.as_str())
+                    };
                     let id = base.and_then(StorageId::parse_hex);
                     let meta = std::fs::symlink_metadata(f.path())?;
                     let tracked_here = id.is_some_and(|i| tracked.contains(&i));
@@ -192,7 +221,10 @@ pub fn gc(cfg: &Config, apply: bool) -> Result<()> {
         println!(
             "would recover: {} WRITING blobs, {} COMPLETING uploads",
             count(&conn, "SELECT count(*) FROM blobs WHERE state = 'writing'")?,
-            count(&conn, "SELECT count(*) FROM multipart_uploads WHERE state = 'completing'")?
+            count(
+                &conn,
+                "SELECT count(*) FROM multipart_uploads WHERE state = 'completing'"
+            )?
         );
     }
     let mut total = 0u64;
@@ -239,7 +271,9 @@ pub fn gc(cfg: &Config, apply: bool) -> Result<()> {
     if apply {
         println!("reclaimed {total} garbage blobs ({bytes} bytes); {pending} not yet eligible");
     } else {
-        println!("dry run: {total} eligible garbage blobs ({bytes} bytes); {pending} garbage rows total");
+        println!(
+            "dry run: {total} eligible garbage blobs ({bytes} bytes); {pending} garbage rows total"
+        );
     }
     Ok(())
 }
@@ -252,4 +286,3 @@ pub fn set_quota(cfg: &Config, name: &str, quota: Option<u64>) -> Result<()> {
     }
     Ok(())
 }
-

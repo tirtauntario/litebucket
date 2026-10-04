@@ -37,7 +37,11 @@ mod imp {
         if !armed() {
             return None;
         }
-        table().lock().unwrap_or_else(|e| e.into_inner()).get(name).cloned()
+        table()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(name)
+            .cloned()
     }
 
     pub fn set(name: &str, action: Option<&str>) {

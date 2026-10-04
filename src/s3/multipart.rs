@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::error::{S3Error, S3Result};
-use super::headers::{content_headers, iso8601, quote_etag, response, user_metadata, write_conditions, xml};
+use super::headers::{
+    content_headers, iso8601, quote_etag, response, user_metadata, write_conditions, xml,
+};
 use super::integrity::ChecksumRequest;
 use super::object::{checksum_headers, commit_error};
 use super::payload::Payload;
@@ -30,8 +32,8 @@ use crate::error::Error;
 use crate::fsutil::Area;
 use crate::ids::UploadId;
 use crate::metadata::queries::{
-    self, BeginCompletion, BlobArea, CreateUpload, NewObject, ObjectCommit, PartCommit, PartRow, UploadRow,
-    UploadState, WriteConditions,
+    self, BeginCompletion, BlobArea, CreateUpload, NewObject, ObjectCommit, PartCommit, PartRow,
+    UploadRow, UploadState, WriteConditions,
 };
 use crate::metadata::{now_ms, with_named_write_tx, with_write_tx};
 use crate::store::{CopySource, Reconciled, Store};
@@ -60,13 +62,16 @@ async fn load_upload(cx: &Cx, id: &UploadId, bucket: &crate::ids::BucketId) -> S
 
 fn checksum_choice(cx: &Cx) -> S3Result<(Algorithm, ChecksumType, bool)> {
     let alg = match cx.req.header("x-amz-checksum-algorithm")? {
-        Some(a) => Some(
-            Algorithm::parse(a).ok_or_else(|| S3Error::invalid_request(format!("Checksum algorithm {a} is not supported")))?,
-        ),
+        Some(a) => Some(Algorithm::parse(a).ok_or_else(|| {
+            S3Error::invalid_request(format!("Checksum algorithm {a} is not supported"))
+        })?),
         None => None,
     };
     let kind = match cx.req.header("x-amz-checksum-type")? {
-        Some(t) => Some(ChecksumType::parse(t).ok_or_else(|| S3Error::invalid_request("Invalid x-amz-checksum-type"))?),
+        Some(t) => Some(
+            ChecksumType::parse(t)
+                .ok_or_else(|| S3Error::invalid_request("Invalid x-amz-checksum-type"))?,
+        ),
         None => None,
     };
     match (alg, kind) {
@@ -146,7 +151,11 @@ fn part_number(cx: &Cx) -> S3Result<u32> {
         .q("partNumber")
         .and_then(|v| v.parse::<u32>().ok())
         .filter(|n| (1..=max).contains(n))
-        .ok_or_else(|| S3Error::invalid_argument(format!("Part number must be an integer between 1 and {max}, inclusive")))
+        .ok_or_else(|| {
+            S3Error::invalid_argument(format!(
+                "Part number must be an integer between 1 and {max}, inclusive"
+            ))
+        })
 }
 
 pub async fn upload_part(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
@@ -155,11 +164,15 @@ pub async fn upload_part(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     let id = upload_id(cx)?;
     let number = part_number(cx)?;
     let integrity = ChecksumRequest::parse(&cx.req, &cx.auth.payload)?;
-    let len = payload_length(&cx.req, &cx.auth.payload)?.ok_or_else(S3Error::missing_content_length)?;
+    let len =
+        payload_length(&cx.req, &cx.auth.payload)?.ok_or_else(S3Error::missing_content_length)?;
     if len > store.config.limits.max_part_bytes {
         return Err(S3Error::entity_too_large()
             .with_extra("ProposedSize", len.to_string())
-            .with_extra("MaxSizeAllowed", store.config.limits.max_part_bytes.to_string()));
+            .with_extra(
+                "MaxSizeAllowed",
+                store.config.limits.max_part_bytes.to_string(),
+            ));
     }
     let bucket = cx.bucket().await?;
     let upload = load_upload(cx, &id, &bucket.id).await?;
@@ -180,7 +193,10 @@ pub async fn upload_part(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     let _permit = store.capacity.acquire(PermitKind::Upload).await?;
     let mut reservation = store.capacity.reserve(len)?;
     let ticket = store.new_blob(BlobArea::Part).await?;
-    let trailer = cx.req.header("x-amz-trailer")?.map(|t| t.trim().to_ascii_lowercase());
+    let trailer = cx
+        .req
+        .header("x-amz-trailer")?
+        .map(|t| t.trim().to_ascii_lowercase());
     let mut payload = Payload::new(
         body,
         cx.auth.payload.clone(),
@@ -196,7 +212,10 @@ pub async fn upload_part(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     let verified = integrity.verify(&received.digests, payload.trailers())?;
     let part_checksum = StoredChecksum::full(
         upload.checksum_algorithm,
-        received.digests.get(upload.checksum_algorithm).unwrap_or_default(),
+        received
+            .digests
+            .get(upload.checksum_algorithm)
+            .unwrap_or_default(),
     );
     let reply_checksum = match verified {
         Some((a, d)) => Some(StoredChecksum::full(a, &d)),
@@ -221,7 +240,11 @@ pub async fn upload_part(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
             let res = store
                 .db
                 .write(move |c| {
-                    with_named_write_tx(c, "part", |tx| queries::commit_part(tx, &uid, &bid, &key, number, &blob, &etag2, now, after))
+                    with_named_write_tx(c, "part", |tx| {
+                        queries::commit_part(
+                            tx, &uid, &bid, &key, number, &blob, &etag2, now, after,
+                        )
+                    })
                 })
                 .await;
             let replaced = match res {
@@ -285,22 +308,37 @@ fn parse_manifest(body: &[u8]) -> S3Result<Vec<ManifestPart>> {
         for c in &p.children {
             match c.name.as_str() {
                 "PartNumber" => number = c.text.trim().parse::<u32>().ok(),
-                "ETag" => etag = Some(super::headers::etag_list(&c.text).into_iter().next().unwrap_or_default()),
+                "ETag" => {
+                    etag = Some(
+                        super::headers::etag_list(&c.text)
+                            .into_iter()
+                            .next()
+                            .unwrap_or_default(),
+                    )
+                }
                 name => {
                     let alg = Algorithm::ALL
                         .into_iter()
                         .find(|a| a.xml_name() == name)
                         .ok_or_else(S3Error::malformed_xml)?;
                     if checksum.is_some() {
-                        return Err(S3Error::invalid_request("A part may carry only one checksum"));
+                        return Err(S3Error::invalid_request(
+                            "A part may carry only one checksum",
+                        ));
                     }
                     checksum = Some((alg, c.text.trim().to_string()));
                 }
             }
         }
         let number = number.ok_or_else(S3Error::malformed_xml)?;
-        let etag = etag.filter(|e| !e.is_empty()).ok_or_else(S3Error::malformed_xml)?;
-        parts.push(ManifestPart { number, etag, checksum });
+        let etag = etag
+            .filter(|e| !e.is_empty())
+            .ok_or_else(S3Error::malformed_xml)?;
+        parts.push(ManifestPart {
+            number,
+            etag,
+            checksum,
+        });
     }
     if parts.is_empty() {
         return Err(S3Error::malformed_xml()
@@ -310,7 +348,9 @@ fn parse_manifest(body: &[u8]) -> S3Result<Vec<ManifestPart>> {
         return Err(S3Error::invalid_part_order());
     }
     if parts.iter().any(|p| p.number == 0 || p.number > 10_000) {
-        return Err(S3Error::invalid_part("Part numbers must be between 1 and 10000"));
+        return Err(S3Error::invalid_part(
+            "Part numbers must be between 1 and 10000",
+        ));
     }
     Ok(parts)
 }
@@ -332,20 +372,36 @@ fn fingerprint(
             h.update(format!("{}={v}", a.as_str()).as_bytes());
         }
     }
-    h.update(format!("\nif-match={:?}\nif-none-match={}", cond.if_match, cond.if_none_match_any).as_bytes());
-    h.update(format!("\ntype={checksum_type:?}\nsize={mp_size:?}\nfull={full_checksum:?}").as_bytes());
+    h.update(
+        format!(
+            "\nif-match={:?}\nif-none-match={}",
+            cond.if_match, cond.if_none_match_any
+        )
+        .as_bytes(),
+    );
+    h.update(
+        format!("\ntype={checksum_type:?}\nsize={mp_size:?}\nfull={full_checksum:?}").as_bytes(),
+    );
     h.finalize().into()
 }
 
 fn completion_xml(cx: &Cx, r: &Receipt) -> String {
     let mut w = XmlWriter::new();
     w.root("CompleteMultipartUploadResult")
-        .elem("Location", &format!("/{}/{}", r.bucket, crate::sigv4::uri_encode(r.key.as_bytes(), false)))
+        .elem(
+            "Location",
+            &format!(
+                "/{}/{}",
+                r.bucket,
+                crate::sigv4::uri_encode(r.key.as_bytes(), false)
+            ),
+        )
         .elem("Bucket", &r.bucket)
         .elem("Key", &r.key)
         .elem("ETag", &quote_etag(&r.etag));
     if let Some(c) = &r.checksum {
-        w.elem(c.algorithm.xml_name(), &c.value).elem("ChecksumType", c.kind.as_str());
+        w.elem(c.algorithm.xml_name(), &c.value)
+            .elem("ChecksumType", c.kind.as_str());
     }
     let _ = cx;
     w.close("CompleteMultipartUploadResult");
@@ -362,7 +418,10 @@ pub async fn complete(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     let cond = write_conditions(&cx.req)?;
     let req_type = cx.req.header("x-amz-checksum-type")?.map(|s| s.to_string());
     let mp_size = match cx.req.header("x-amz-mp-object-size")? {
-        Some(v) => Some(v.parse::<u64>().map_err(|_| S3Error::invalid_argument("invalid x-amz-mp-object-size"))?),
+        Some(v) => Some(
+            v.parse::<u64>()
+                .map_err(|_| S3Error::invalid_argument("invalid x-amz-mp-object-size"))?,
+        ),
         None => None,
     };
     let mut full_checksum = None;
@@ -371,7 +430,14 @@ pub async fn complete(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
             full_checksum = Some((a, v.trim().to_string()));
         }
     }
-    let fp = fingerprint(id.as_str(), &manifest, &cond, req_type.as_deref(), mp_size, full_checksum.clone());
+    let fp = fingerprint(
+        id.as_str(),
+        &manifest,
+        &cond,
+        req_type.as_deref(),
+        mp_size,
+        full_checksum.clone(),
+    );
 
     let _assembly = store.capacity.acquire(PermitKind::Assembly).await?;
     let _activity = store.upload_activity(id.as_str());
@@ -385,7 +451,10 @@ pub async fn complete(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
             let fresh = upload.receipt_expires_at_ms.is_some_and(|e| e > now_ms());
             if fresh
                 && upload.completion_fingerprint.as_deref() == Some(fp.as_slice())
-                && let Some(r) = upload.result_json.as_deref().and_then(|j| serde_json::from_str::<Receipt>(j).ok())
+                && let Some(r) = upload
+                    .result_json
+                    .as_deref()
+                    .and_then(|j| serde_json::from_str::<Receipt>(j).ok())
             {
                 return Ok(xml(StatusCode::OK, completion_xml(cx, &r)));
             }
@@ -410,7 +479,12 @@ pub async fn complete(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
 
     // Validate the manifest against committed parts.
     let composite = upload.checksum_explicit && upload.checksum_type == ChecksumType::Composite;
-    if composite && !manifest.iter().enumerate().all(|(i, p)| p.number as usize == i + 1) {
+    if composite
+        && !manifest
+            .iter()
+            .enumerate()
+            .all(|(i, p)| p.number as usize == i + 1)
+    {
         return Err(S3Error::invalid_part(
             "Composite checksum uploads require consecutive part numbers starting at 1.",
         ));
@@ -455,12 +529,17 @@ pub async fn complete(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
         if part.size > store.config.limits.max_part_bytes {
             return Err(S3Error::entity_too_large());
         }
-        total = total.checked_add(part.size).ok_or_else(S3Error::entity_too_large)?;
+        total = total
+            .checked_add(part.size)
+            .ok_or_else(S3Error::entity_too_large)?;
     }
     if total > store.config.limits.max_object_bytes {
         return Err(S3Error::entity_too_large()
             .with_extra("ProposedSize", total.to_string())
-            .with_extra("MaxSizeAllowed", store.config.limits.max_object_bytes.to_string()));
+            .with_extra(
+                "MaxSizeAllowed",
+                store.config.limits.max_object_bytes.to_string(),
+            ));
     }
     if mp_size.is_some_and(|s| s != total) {
         return Err(S3Error::invalid_request(
@@ -529,7 +608,9 @@ impl CompletionJob {
         let begin = store
             .db
             .write(move |c| {
-                with_named_write_tx(c, "begin_completion", |tx| queries::begin_completion(tx, &idc, &fp, &manifest_json, &output, now))
+                with_named_write_tx(c, "begin_completion", |tx| {
+                    queries::begin_completion(tx, &idc, &fp, &manifest_json, &output, now)
+                })
             })
             .await?;
         if begin != BeginCompletion::Started {
@@ -544,7 +625,9 @@ impl CompletionJob {
             let after = store.garbage_after();
             let _ = store
                 .db
-                .write(move |c| with_write_tx(c, |tx| queries::revert_completion(tx, &uid, &output, after)))
+                .write(move |c| {
+                    with_write_tx(c, |tx| queries::revert_completion(tx, &uid, &output, after))
+                })
                 .await;
         }
         result
@@ -573,7 +656,12 @@ impl CompletionJob {
             let digests: Vec<Vec<u8>> = self
                 .selected
                 .iter()
-                .map(|p| p.checksum.as_ref().and_then(|c| c.digest()).unwrap_or_default())
+                .map(|p| {
+                    p.checksum
+                        .as_ref()
+                        .and_then(|c| c.digest())
+                        .unwrap_or_default()
+                })
                 .collect();
             StoredChecksum {
                 algorithm: alg,
@@ -599,7 +687,8 @@ impl CompletionJob {
             etag: etag.clone(),
             checksum: self.upload.checksum_explicit.then_some(checksum),
         };
-        let result_json = serde_json::to_string(&receipt).map_err(|e| S3Error::internal().with_detail(e.to_string()))?;
+        let result_json = serde_json::to_string(&receipt)
+            .map_err(|e| S3Error::internal().with_detail(e.to_string()))?;
         let now = now_ms();
         let new = NewObject {
             bucket_id: self.bucket_id,
@@ -624,7 +713,9 @@ impl CompletionJob {
         let res = store
             .db
             .write(move |c| {
-                with_named_write_tx(c, "completion", |tx| queries::finish_completion(tx, &uid, &new, &cond, &result_json, expires, after))
+                with_named_write_tx(c, "completion", |tx| {
+                    queries::finish_completion(tx, &uid, &new, &cond, &result_json, expires, after)
+                })
             })
             .await;
         match res {
@@ -669,17 +760,32 @@ pub async fn abort(cx: &Cx) -> S3Result<Response<Body>> {
     let ttl = store.config.multipart.receipt_retention_seconds as i64 * 1000;
     let released = store
         .db
-        .write(move |c| with_write_tx(c, |tx| queries::abort_upload(tx, &idc, now, now + ttl, after)))
+        .write(move |c| {
+            with_write_tx(c, |tx| {
+                queries::abort_upload(tx, &idc, now, now + ttl, after)
+            })
+        })
         .await?
         .ok_or_else(S3Error::no_such_upload)?;
     store.capacity.release_part_bytes(released);
-    store.metrics.multipart_aborted.fetch_add(1, Ordering::Relaxed);
-    Ok(response(StatusCode::NO_CONTENT, Vec::<(&str, String)>::new(), Body::empty()))
+    store
+        .metrics
+        .multipart_aborted
+        .fetch_add(1, Ordering::Relaxed);
+    Ok(response(
+        StatusCode::NO_CONTENT,
+        Vec::<(&str, String)>::new(),
+        Body::empty(),
+    ))
 }
 
 pub async fn list_parts(cx: &Cx) -> S3Result<Response<Body>> {
     let key = cx.req.object_key().clone();
-    if !cx.auth.credential.allows_list(cx.req.bucket_name(), key.as_bytes()) {
+    if !cx
+        .auth
+        .credential
+        .allows_list(cx.req.bucket_name(), key.as_bytes())
+    {
         return Err(S3Error::access_denied());
     }
     let id = upload_id(cx)?;
@@ -689,7 +795,9 @@ pub async fn list_parts(cx: &Cx) -> S3Result<Response<Body>> {
         return Err(S3Error::no_such_upload());
     }
     let marker: u32 = match cx.req.q("part-number-marker") {
-        Some(v) => v.parse().map_err(|_| S3Error::invalid_argument("invalid part-number-marker"))?,
+        Some(v) => v
+            .parse()
+            .map_err(|_| S3Error::invalid_argument("invalid part-number-marker"))?,
         None => 0,
     };
     let max: usize = match cx.req.q("max-parts") {

@@ -34,7 +34,10 @@ pub struct Running {
 }
 
 fn load_tls(cfg: &crate::config::Config) -> Result<Option<tokio_rustls::TlsAcceptor>> {
-    let (Some(cert), Some(key)) = (&cfg.http.tls_certificate_file, &cfg.http.tls_private_key_file) else {
+    let (Some(cert), Some(key)) = (
+        &cfg.http.tls_certificate_file,
+        &cfg.http.tls_private_key_file,
+    ) else {
         return Ok(None);
     };
     let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(std::fs::File::open(cert)?))
@@ -141,7 +144,10 @@ pub async fn start(store: Arc<Store>) -> Result<Running> {
             }
         }
         drop(listener);
-        if tokio::time::timeout(grace, graceful.shutdown()).await.is_err() {
+        if tokio::time::timeout(grace, graceful.shutdown())
+            .await
+            .is_err()
+        {
             tracing::warn!("connections still open after the shutdown grace period");
         }
     });
@@ -175,11 +181,15 @@ impl Running {
         store.set_ready(false);
         let grace = Duration::from_secs(store.config.maintenance.shutdown_grace_seconds);
         let _ = self.stop.send(true);
-        let s3_drained = tokio::time::timeout(grace + Duration::from_secs(1), self.s3_task).await.is_ok();
+        let s3_drained = tokio::time::timeout(grace + Duration::from_secs(1), self.s3_task)
+            .await
+            .is_ok();
         let _ = self.mgmt_task.await;
         self.maintenance.stop().await;
         store.tracker.close();
-        let tasks_drained = tokio::time::timeout(grace, store.tracker.wait()).await.is_ok();
+        let tasks_drained = tokio::time::timeout(grace, store.tracker.wait())
+            .await
+            .is_ok();
         let db = store.db.clone();
         let _ = tokio::task::spawn_blocking(move || db.shutdown()).await;
         let drained = s3_drained && tasks_drained;
@@ -190,7 +200,9 @@ impl Running {
 
 fn management_router(store: Arc<Store>) -> Router {
     let metrics_enabled = store.config.management.metrics_enabled;
-    let mut r = Router::new().route("/livez", get(livez)).route("/readyz", get(readyz));
+    let mut r = Router::new()
+        .route("/livez", get(livez))
+        .route("/readyz", get(readyz));
     if metrics_enabled {
         r = r.route("/metrics", get(metrics));
     }
@@ -225,9 +237,15 @@ async fn readyz(State(store): State<Arc<Store>>) -> Response<Body> {
         "mutations_halted": halted.is_some(),
     });
     let mut r = Response::new(Body::from(body.to_string()));
-    *r.status_mut() = if ready && !integrity { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
-    r.headers_mut()
-        .insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("application/json"));
+    *r.status_mut() = if ready && !integrity {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    r.headers_mut().insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("application/json"),
+    );
     r
 }
 
@@ -236,26 +254,106 @@ async fn metrics(State(store): State<Arc<Store>>) -> Response<Body> {
     let fs = c.fs_stats();
     let db = store.db.stats();
     let gauges = [
-        ("storlite_active_uploads", "Uploads (including part reception) in progress.", c.in_use(PermitKind::Upload) as f64),
-        ("storlite_active_downloads", "Downloads in progress.", c.in_use(PermitKind::Download) as f64),
-        ("storlite_active_copies", "Server-side copies in progress.", c.in_use(PermitKind::Copy) as f64),
-        ("storlite_active_assemblies", "Multipart assemblies in progress.", c.in_use(PermitKind::Assembly) as f64),
-        ("storlite_rejected_admissions_total", "Requests rejected waiting for a transfer permit.", c.stats.rejected_admissions.load(Ordering::Relaxed) as f64),
-        ("storlite_rejected_capacity_total", "Writes rejected for disk or temporary-space limits.", c.stats.rejected_capacity.load(Ordering::Relaxed) as f64),
-        ("storlite_reserved_bytes", "Bytes reserved by in-flight writes.", c.reserved_bytes() as f64),
-        ("storlite_multipart_part_bytes", "Bytes held by committed multipart parts.", c.part_bytes() as f64),
-        ("storlite_fs_available_bytes", "Filesystem bytes available to the service.", fs.map(|f| f.avail_bytes as f64).unwrap_or(0.0)),
-        ("storlite_fs_available_inodes", "Filesystem inodes available.", fs.map(|f| f.avail_inodes as f64).unwrap_or(0.0)),
-        ("storlite_db_write_queue_depth", "Queued metadata write jobs.", db.write_queue_depth.load(Ordering::Relaxed) as f64),
-        ("storlite_db_read_queue_depth", "Queued metadata read jobs.", db.read_queue_depth.load(Ordering::Relaxed) as f64),
-        ("storlite_db_queue_rejections_total", "Metadata jobs rejected for a full queue.", db.queue_rejections.load(Ordering::Relaxed) as f64),
-        ("storlite_db_write_jobs_total", "Metadata write jobs.", db.write_jobs.load(Ordering::Relaxed) as f64),
-        ("storlite_db_write_seconds_total", "Time spent in metadata write jobs.", db.write_micros_total.load(Ordering::Relaxed) as f64 / 1e6),
-        ("storlite_db_commit_uncertain_total", "Commits with an initially unknown outcome.", db.commit_uncertain.load(Ordering::Relaxed) as f64),
-        ("storlite_garbage_backlog_blobs", "Tracked garbage awaiting deletion.", store.maintenance_gauges().0 as f64),
-        ("storlite_garbage_backlog_bytes", "Tracked garbage bytes awaiting deletion.", store.maintenance_gauges().1 as f64),
-        ("storlite_multipart_active_uploads", "Open or completing multipart uploads.", store.maintenance_gauges().2 as f64),
-        ("storlite_ready", "1 when serving.", if store.is_ready() { 1.0 } else { 0.0 }),
+        (
+            "storlite_active_uploads",
+            "Uploads (including part reception) in progress.",
+            c.in_use(PermitKind::Upload) as f64,
+        ),
+        (
+            "storlite_active_downloads",
+            "Downloads in progress.",
+            c.in_use(PermitKind::Download) as f64,
+        ),
+        (
+            "storlite_active_copies",
+            "Server-side copies in progress.",
+            c.in_use(PermitKind::Copy) as f64,
+        ),
+        (
+            "storlite_active_assemblies",
+            "Multipart assemblies in progress.",
+            c.in_use(PermitKind::Assembly) as f64,
+        ),
+        (
+            "storlite_rejected_admissions_total",
+            "Requests rejected waiting for a transfer permit.",
+            c.stats.rejected_admissions.load(Ordering::Relaxed) as f64,
+        ),
+        (
+            "storlite_rejected_capacity_total",
+            "Writes rejected for disk or temporary-space limits.",
+            c.stats.rejected_capacity.load(Ordering::Relaxed) as f64,
+        ),
+        (
+            "storlite_reserved_bytes",
+            "Bytes reserved by in-flight writes.",
+            c.reserved_bytes() as f64,
+        ),
+        (
+            "storlite_multipart_part_bytes",
+            "Bytes held by committed multipart parts.",
+            c.part_bytes() as f64,
+        ),
+        (
+            "storlite_fs_available_bytes",
+            "Filesystem bytes available to the service.",
+            fs.map(|f| f.avail_bytes as f64).unwrap_or(0.0),
+        ),
+        (
+            "storlite_fs_available_inodes",
+            "Filesystem inodes available.",
+            fs.map(|f| f.avail_inodes as f64).unwrap_or(0.0),
+        ),
+        (
+            "storlite_db_write_queue_depth",
+            "Queued metadata write jobs.",
+            db.write_queue_depth.load(Ordering::Relaxed) as f64,
+        ),
+        (
+            "storlite_db_read_queue_depth",
+            "Queued metadata read jobs.",
+            db.read_queue_depth.load(Ordering::Relaxed) as f64,
+        ),
+        (
+            "storlite_db_queue_rejections_total",
+            "Metadata jobs rejected for a full queue.",
+            db.queue_rejections.load(Ordering::Relaxed) as f64,
+        ),
+        (
+            "storlite_db_write_jobs_total",
+            "Metadata write jobs.",
+            db.write_jobs.load(Ordering::Relaxed) as f64,
+        ),
+        (
+            "storlite_db_write_seconds_total",
+            "Time spent in metadata write jobs.",
+            db.write_micros_total.load(Ordering::Relaxed) as f64 / 1e6,
+        ),
+        (
+            "storlite_db_commit_uncertain_total",
+            "Commits with an initially unknown outcome.",
+            db.commit_uncertain.load(Ordering::Relaxed) as f64,
+        ),
+        (
+            "storlite_garbage_backlog_blobs",
+            "Tracked garbage awaiting deletion.",
+            store.maintenance_gauges().0 as f64,
+        ),
+        (
+            "storlite_garbage_backlog_bytes",
+            "Tracked garbage bytes awaiting deletion.",
+            store.maintenance_gauges().1 as f64,
+        ),
+        (
+            "storlite_multipart_active_uploads",
+            "Open or completing multipart uploads.",
+            store.maintenance_gauges().2 as f64,
+        ),
+        (
+            "storlite_ready",
+            "1 when serving.",
+            if store.is_ready() { 1.0 } else { 0.0 },
+        ),
     ];
     let text = store.metrics.render(&gauges);
     let mut r = Response::new(Body::from(text));

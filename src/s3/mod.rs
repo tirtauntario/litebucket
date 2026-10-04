@@ -96,7 +96,9 @@ pub fn error_response(err: &S3Error, request_id: &str, head: bool) -> Response<B
         return headers::response(err.status, headers, Body::empty());
     }
     let mut w = xml::XmlWriter::new();
-    w.open("Error").elem("Code", err.code).elem("Message", &err.message);
+    w.open("Error")
+        .elem("Code", err.code)
+        .elem("Message", &err.message);
     for (k, v) in &err.extra {
         w.elem(k, v);
     }
@@ -125,17 +127,32 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
         let cfg = &store.config;
         let target_len = parts.uri.path().len() + parts.uri.query().map_or(0, |q| q.len() + 1);
         if target_len > cfg.http.max_request_target_bytes {
-            return Err(S3Error::new("RequestURITooLong", StatusCode::URI_TOO_LONG, "The request URI is too long"));
+            return Err(S3Error::new(
+                "RequestURITooLong",
+                StatusCode::URI_TOO_LONG,
+                "The request URI is too long",
+            ));
         }
-        let header_bytes: usize = parts.headers.iter().map(|(k, v)| k.as_str().len() + v.len() + 4).sum();
-        if parts.headers.len() > cfg.http.max_header_count || header_bytes > cfg.http.max_header_bytes {
+        let header_bytes: usize = parts
+            .headers
+            .iter()
+            .map(|(k, v)| k.as_str().len() + v.len() + 4)
+            .sum();
+        if parts.headers.len() > cfg.http.max_header_count
+            || header_bytes > cfg.http.max_header_bytes
+        {
             return Err(S3Error::new(
                 "RequestHeaderSectionTooLarge",
                 StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
                 "Your request header section exceeds the maximum allowed size.",
             ));
         }
-        let req = S3Request::parse(request_id.clone(), parts.method.clone(), &parts.uri, parts.headers.clone())?;
+        let req = S3Request::parse(
+            request_id.clone(),
+            parts.method.clone(),
+            &parts.uri,
+            parts.headers.clone(),
+        )?;
         bucket_name = req.bucket.clone();
         if cfg.logging.log_object_keys {
             key_for_log = req.key.as_ref().map(|k| k.as_str().to_string());
@@ -144,7 +161,9 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
         let op = capabilities::resolve(&req)?;
         op_name = op.name();
         if !store.is_ready() {
-            return Err(S3Error::service_unavailable("The service is starting or shutting down."));
+            return Err(S3Error::service_unavailable(
+                "The service is starting or shutting down.",
+            ));
         }
         capabilities::validate(&req, op, &store.meta.owner_id)?;
         if op == Op::Preflight {
@@ -166,7 +185,12 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
         if op.is_mutation() {
             store.check_writable()?;
         }
-        let cx = Cx { store: store.clone(), req, auth, op };
+        let cx = Cx {
+            store: store.clone(),
+            req,
+            auth,
+            op,
+        };
         dispatch(cx, body).await.map(|r| (r, op))
     }
     .await;
@@ -186,17 +210,24 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
         {
             h.insert("x-amz-request-id", v);
         }
-        h.insert(http::header::SERVER, http::HeaderValue::from_static("storlite"));
+        h.insert(
+            http::header::SERVER,
+            http::HeaderValue::from_static("storlite"),
+        );
     }
     if let (Some(origin), Some(bucket)) = (origin, bucket_name.as_deref())
         && op_name != "CorsPreflight"
     {
-        cors::apply_actual_request_headers(&store, bucket, &origin, &parts.method, &mut response).await;
+        cors::apply_actual_request_headers(&store, bucket, &origin, &parts.method, &mut response)
+            .await;
     }
     let elapsed = started.elapsed();
     store.metrics.observe(op_name, status.as_u16(), elapsed);
     let code = error.as_ref().map(|e| e.code).unwrap_or("");
-    let detail = error.as_ref().and_then(|e| e.detail.as_deref()).unwrap_or("");
+    let detail = error
+        .as_ref()
+        .and_then(|e| e.detail.as_deref())
+        .unwrap_or("");
     if status.is_server_error() {
         tracing::error!(
             event = "request",
@@ -254,7 +285,12 @@ async fn dispatch(cx: Cx, body: Body) -> S3Result<Response<Body>> {
 
 /// Read a bounded control body (XML), verifying payload signing and any
 /// supplied integrity values.
-pub async fn read_control_body(cx: &Cx, body: Body, limit: usize, require_integrity: bool) -> S3Result<bytes::Bytes> {
+pub async fn read_control_body(
+    cx: &Cx,
+    body: Body,
+    limit: usize,
+    require_integrity: bool,
+) -> S3Result<bytes::Bytes> {
     let mut integrity = integrity::ChecksumRequest::parse(&cx.req, &cx.auth.payload)?;
     if cx.op == capabilities::Op::CompleteMultipartUpload {
         // On completion, x-amz-checksum-* headers describe the assembled
@@ -268,7 +304,10 @@ pub async fn read_control_body(cx: &Cx, body: Body, limit: usize, require_integr
         ));
     }
     let expected = payload_length(&cx.req, &cx.auth.payload)?;
-    let trailer = cx.req.header("x-amz-trailer")?.map(|t| t.trim().to_ascii_lowercase());
+    let trailer = cx
+        .req
+        .header("x-amz-trailer")?
+        .map(|t| t.trim().to_ascii_lowercase());
     let mut p = payload::Payload::new(
         body,
         cx.auth.payload.clone(),

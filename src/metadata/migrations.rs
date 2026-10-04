@@ -40,7 +40,8 @@ pub fn applied(conn: &Connection) -> Result<Vec<(i64, Vec<u8>)>> {
     if exists.is_none() {
         return Ok(Vec::new());
     }
-    let mut stmt = conn.prepare("SELECT version, checksum_sha256 FROM schema_migrations ORDER BY version")?;
+    let mut stmt =
+        conn.prepare("SELECT version, checksum_sha256 FROM schema_migrations ORDER BY version")?;
     let rows = stmt
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -101,10 +102,14 @@ mod tests {
         let (_d, conn) = fresh();
         assert_eq!(apply(&conn).unwrap(), MIGRATIONS.len());
         assert_eq!(apply(&conn).unwrap(), 0);
-        let ok: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+        let ok: String = conn
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(ok, "ok");
         let fk: i64 = conn
-            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(fk, 0);
     }
@@ -125,8 +130,11 @@ mod tests {
     fn tampered_migration_checksum_is_rejected() {
         let (_d, conn) = fresh();
         apply(&conn).unwrap();
-        conn.execute("UPDATE schema_migrations SET checksum_sha256 = zeroblob(32)", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE schema_migrations SET checksum_sha256 = zeroblob(32)",
+            [],
+        )
+        .unwrap();
         assert!(matches!(verify(&conn), Err(Error::Integrity(_))));
     }
 

@@ -27,12 +27,17 @@ impl PayloadDecl {
             "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER" => Self::StreamingSignedTrailer,
             "STREAMING-UNSIGNED-PAYLOAD-TRAILER" => Self::StreamingUnsignedTrailer,
             s if s.starts_with("STREAMING-") => {
-                return Err(S3Error::not_implemented(format!("payload signing mode {s} is not supported")));
+                return Err(S3Error::not_implemented(format!(
+                    "payload signing mode {s} is not supported"
+                )));
             }
             s => {
                 let mut out = [0u8; 32];
-                if s.len() != 64 || hex::decode_to_slice(s.to_ascii_lowercase(), &mut out).is_err() {
-                    return Err(S3Error::invalid_argument("x-amz-content-sha256 must be a SHA-256 hex digest or a supported mode"));
+                if s.len() != 64 || hex::decode_to_slice(s.to_ascii_lowercase(), &mut out).is_err()
+                {
+                    return Err(S3Error::invalid_argument(
+                        "x-amz-content-sha256 must be a SHA-256 hex digest or a supported mode",
+                    ));
                 }
                 Self::Sha256(out)
             }
@@ -47,7 +52,10 @@ impl PayloadDecl {
     }
 
     pub fn has_trailer(&self) -> bool {
-        matches!(self, Self::StreamingSignedTrailer | Self::StreamingUnsignedTrailer)
+        matches!(
+            self,
+            Self::StreamingSignedTrailer | Self::StreamingUnsignedTrailer
+        )
     }
 }
 
@@ -99,12 +107,20 @@ pub fn reject_unsupported_schemes(req: &S3Request) -> S3Result<()> {
     Ok(())
 }
 
-pub fn authenticate(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) -> S3Result<AuthContext> {
+pub fn authenticate(
+    req: &S3Request,
+    creds: &CredentialSet,
+    p: &AuthParams<'_>,
+) -> S3Result<AuthContext> {
     let has_header = req.headers.contains_key(http::header::AUTHORIZATION);
-    let has_query = req.has_q("X-Amz-Signature") || req.has_q("X-Amz-Algorithm") || req.has_q("X-Amz-Credential");
+    let has_query = req.has_q("X-Amz-Signature")
+        || req.has_q("X-Amz-Algorithm")
+        || req.has_q("X-Amz-Credential");
     reject_unsupported_schemes(req)?;
     if req.headers.contains_key("x-amz-security-token") || req.has_q("X-Amz-Security-Token") {
-        return Err(S3Error::invalid_request("Temporary security credentials are not supported by this service."));
+        return Err(S3Error::invalid_request(
+            "Temporary security credentials are not supported by this service.",
+        ));
     }
     match (has_header, has_query) {
         (true, true) => Err(S3Error::invalid_argument(
@@ -116,7 +132,11 @@ pub fn authenticate(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) 
     }
 }
 
-fn header_auth(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) -> S3Result<AuthContext> {
+fn header_auth(
+    req: &S3Request,
+    creds: &CredentialSet,
+    p: &AuthParams<'_>,
+) -> S3Result<AuthContext> {
     let value = req
         .header("authorization")?
         .ok_or_else(S3Error::access_denied)?;
@@ -143,7 +163,11 @@ fn header_auth(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) -> S3
     }
     let payload_hash = req
         .header("x-amz-content-sha256")?
-        .ok_or_else(|| S3Error::invalid_request("Missing required header for this request: x-amz-content-sha256"))?
+        .ok_or_else(|| {
+            S3Error::invalid_request(
+                "Missing required header for this request: x-amz-content-sha256",
+            )
+        })?
         .to_string();
     let payload = PayloadDecl::parse(&payload_hash)?;
     verify(
@@ -163,19 +187,22 @@ fn header_auth(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) -> S3
 
 fn query_auth(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) -> S3Result<AuthContext> {
     let get = |n: &str| {
-        req.q(n)
-            .ok_or_else(|| S3Error::authorization_query_error(format!("Query-string authentication requires {n}")))
+        req.q(n).ok_or_else(|| {
+            S3Error::authorization_query_error(format!("Query-string authentication requires {n}"))
+        })
     };
     if get("X-Amz-Algorithm")? != sigv4::ALGORITHM {
         return Err(S3Error::authorization_query_error(
             "X-Amz-Algorithm only supports \"AWS4-HMAC-SHA256\"",
         ));
     }
-    let credential = CredentialScope::parse(get("X-Amz-Credential")?)
-        .ok_or_else(|| S3Error::authorization_query_error("Error parsing the X-Amz-Credential parameter"))?;
+    let credential = CredentialScope::parse(get("X-Amz-Credential")?).ok_or_else(|| {
+        S3Error::authorization_query_error("Error parsing the X-Amz-Credential parameter")
+    })?;
     let amz_date = get("X-Amz-Date")?.to_string();
-    let t = sigv4::parse_amz_date(&amz_date)
-        .ok_or_else(|| S3Error::authorization_query_error("X-Amz-Date must be in the ISO8601 Long Format"))?;
+    let t = sigv4::parse_amz_date(&amz_date).ok_or_else(|| {
+        S3Error::authorization_query_error("X-Amz-Date must be in the ISO8601 Long Format")
+    })?;
     let expires: i64 = get("X-Amz-Expires")?
         .parse()
         .map_err(|_| S3Error::authorization_query_error("X-Amz-Expires should be a number"))?;
@@ -188,15 +215,24 @@ fn query_auth(req: &S3Request, creds: &CredentialSet, p: &AuthParams<'_>) -> S3R
         return Err(S3Error::access_denied().with_detail("presigned request is not valid yet"));
     }
     if p.now_secs > t + expires {
-        return Err(S3Error::new("AccessDenied", http::StatusCode::FORBIDDEN, "Request has expired"));
+        return Err(S3Error::new(
+            "AccessDenied",
+            http::StatusCode::FORBIDDEN,
+            "Request has expired",
+        ));
     }
     let signed = sigv4::parse_signed_headers(get("X-Amz-SignedHeaders")?)
         .map_err(S3Error::authorization_query_error)?;
     let signature = get("X-Amz-Signature")?.to_string();
-    let payload_hash = req.q("X-Amz-Content-Sha256").unwrap_or("UNSIGNED-PAYLOAD").to_string();
+    let payload_hash = req
+        .q("X-Amz-Content-Sha256")
+        .unwrap_or("UNSIGNED-PAYLOAD")
+        .to_string();
     let payload = PayloadDecl::parse(&payload_hash)?;
     if payload.is_streaming() {
-        return Err(S3Error::not_implemented("streaming payloads are not supported with presigned URLs"));
+        return Err(S3Error::not_implemented(
+            "streaming payloads are not supported with presigned URLs",
+        ));
     }
     verify(
         req,
@@ -228,7 +264,9 @@ fn verify(
     presigned: bool,
 ) -> S3Result<AuthContext> {
     if scope.date != amz_date[..8] {
-        return Err(S3Error::signature_does_not_match().with_detail("credential scope date mismatch"));
+        return Err(
+            S3Error::signature_does_not_match().with_detail("credential scope date mismatch")
+        );
     }
     if scope.service != "s3" {
         return Err(S3Error::authorization_header_malformed(format!(
@@ -273,11 +311,20 @@ fn verify(
     let signed_str = signed_headers.join(";");
     let key = sigv4::signing_key(credential.secret(), &scope.date, &scope.region, "s3");
     let scope_str = scope.scope();
-    let matched = sigv4::canonical_uri_candidates(&req.raw_path).iter().any(|uri| {
-        let cr = sigv4::canonical_request(req.method.as_str(), uri, &query, &block, &signed_str, payload_hash);
-        let sts = sigv4::string_to_sign(amz_date, &scope_str, &cr);
-        sigv4::signature_eq(&sigv4::hmac(&key, sts.as_bytes()), signature)
-    });
+    let matched = sigv4::canonical_uri_candidates(&req.raw_path)
+        .iter()
+        .any(|uri| {
+            let cr = sigv4::canonical_request(
+                req.method.as_str(),
+                uri,
+                &query,
+                &block,
+                &signed_str,
+                payload_hash,
+            );
+            let sts = sigv4::string_to_sign(amz_date, &scope_str, &cr);
+            sigv4::signature_eq(&sigv4::hmac(&key, sts.as_bytes()), signature)
+        });
     if !matched {
         return Err(S3Error::signature_does_not_match());
     }

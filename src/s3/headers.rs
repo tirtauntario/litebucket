@@ -16,12 +16,16 @@ fn header_text(req: &S3Request, name: &str) -> S3Result<Option<String>> {
     let mut it = req.headers.get_all(name).iter();
     let Some(v) = it.next() else { return Ok(None) };
     if it.next().is_some() {
-        return Err(S3Error::invalid_argument(format!("header {name} must not be repeated")));
+        return Err(S3Error::invalid_argument(format!(
+            "header {name} must not be repeated"
+        )));
     }
     let s = String::from_utf8(v.as_bytes().to_vec())
         .map_err(|_| S3Error::invalid_argument(format!("header {name} is not valid UTF-8")))?;
     if s.len() > MAX_CONTENT_HEADER_BYTES {
-        return Err(S3Error::invalid_argument(format!("header {name} is too long")));
+        return Err(S3Error::invalid_argument(format!(
+            "header {name} is too long"
+        )));
     }
     Ok(Some(s))
 }
@@ -96,7 +100,9 @@ pub fn etag_list(v: &str) -> Vec<String> {
 pub fn write_conditions(req: &S3Request) -> S3Result<WriteConditions> {
     Ok(WriteConditions {
         if_match: req.header("if-match")?.map(etag_list),
-        if_none_match_any: req.header("if-none-match")?.is_some_and(|v| v.trim() == "*"),
+        if_none_match_any: req
+            .header("if-none-match")?
+            .is_some_and(|v| v.trim() == "*"),
     })
 }
 
@@ -110,13 +116,17 @@ pub struct ReadConditions {
 
 fn http_date_header(req: &S3Request, name: &str) -> S3Result<Option<SystemTime>> {
     // Unparseable dates are ignored, as HTTP requires.
-    Ok(req.header(name)?.and_then(|v| httpdate::parse_http_date(v.trim()).ok()))
+    Ok(req
+        .header(name)?
+        .and_then(|v| httpdate::parse_http_date(v.trim()).ok()))
 }
 
 pub fn read_conditions(req: &S3Request, prefix: &str) -> S3Result<ReadConditions> {
     Ok(ReadConditions {
         if_match: req.header(&format!("{prefix}if-match"))?.map(etag_list),
-        if_none_match: req.header(&format!("{prefix}if-none-match"))?.map(etag_list),
+        if_none_match: req
+            .header(&format!("{prefix}if-none-match"))?
+            .map(etag_list),
         if_modified_since: http_date_header(req, &format!("{prefix}if-modified-since"))?,
         if_unmodified_since: http_date_header(req, &format!("{prefix}if-unmodified-since"))?,
     })
@@ -174,7 +184,9 @@ pub fn parse_range(v: &str) -> S3Result<Option<RangeSpec>> {
         return Ok(None);
     };
     if spec.contains(',') {
-        return Err(S3Error::invalid_argument("Multiple byte ranges are not supported"));
+        return Err(S3Error::invalid_argument(
+            "Multiple byte ranges are not supported",
+        ));
     }
     let Some((a, b)) = spec.trim().split_once('-') else {
         return Ok(None);
@@ -245,12 +257,19 @@ pub fn quote_etag(etag: &str) -> String {
 
 /// Build a response; header values that fail validation are dropped rather
 /// than allowing header injection.
-pub fn response<K: AsRef<str>>(status: StatusCode, headers: Vec<(K, String)>, body: Body) -> Response<Body> {
+pub fn response<K: AsRef<str>>(
+    status: StatusCode,
+    headers: Vec<(K, String)>,
+    body: Body,
+) -> Response<Body> {
     let mut r = Response::new(body);
     *r.status_mut() = status;
     for (k, v) in headers {
         let k = k.as_ref();
-        if let (Ok(name), Ok(value)) = (http::HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(&v)) {
+        if let (Ok(name), Ok(value)) = (
+            http::HeaderName::from_bytes(k.as_bytes()),
+            HeaderValue::from_str(&v),
+        ) {
             r.headers_mut().append(name, value);
         } else if let (Ok(name), Ok(value)) = (
             http::HeaderName::from_bytes(k.as_bytes()),
@@ -264,7 +283,11 @@ pub fn response<K: AsRef<str>>(status: StatusCode, headers: Vec<(K, String)>, bo
 }
 
 pub fn xml(status: StatusCode, body: String) -> Response<Body> {
-    response(status, vec![("content-type", "application/xml".to_string())], Body::from(body))
+    response(
+        status,
+        vec![("content-type", "application/xml".to_string())],
+        Body::from(body),
+    )
 }
 
 #[cfg(test)]
@@ -273,7 +296,10 @@ mod tests {
 
     #[test]
     fn ranges() {
-        assert_eq!(parse_range("bytes=0-9").unwrap(), Some(RangeSpec::FromTo(0, 9)));
+        assert_eq!(
+            parse_range("bytes=0-9").unwrap(),
+            Some(RangeSpec::FromTo(0, 9))
+        );
         assert_eq!(parse_range("bytes=5-").unwrap(), Some(RangeSpec::From(5)));
         assert_eq!(parse_range("bytes=-3").unwrap(), Some(RangeSpec::Suffix(3)));
         assert_eq!(parse_range("bytes=9-0").unwrap(), None);
@@ -297,13 +323,21 @@ mod tests {
             if_unmodified_since: Some(t(0)),
             ..Default::default()
         };
-        assert_eq!(evaluate(&c, "e", lm), CondResult::Proceed, "If-Match true overrides IUS");
+        assert_eq!(
+            evaluate(&c, "e", lm),
+            CondResult::Proceed,
+            "If-Match true overrides IUS"
+        );
         let c = ReadConditions {
             if_none_match: Some(vec!["x".into()]),
             if_modified_since: Some(t(2_000_000_000)),
             ..Default::default()
         };
-        assert_eq!(evaluate(&c, "e", lm), CondResult::Proceed, "INM false wins over IMS");
+        assert_eq!(
+            evaluate(&c, "e", lm),
+            CondResult::Proceed,
+            "INM false wins over IMS"
+        );
         let c = ReadConditions {
             if_none_match: Some(vec!["e".into()]),
             ..Default::default()
@@ -313,7 +347,11 @@ mod tests {
             if_modified_since: Some(t(1_000_000_000)),
             ..Default::default()
         };
-        assert_eq!(evaluate(&c, "e", lm), CondResult::NotModified, "same second is not modified");
+        assert_eq!(
+            evaluate(&c, "e", lm),
+            CondResult::NotModified,
+            "same second is not modified"
+        );
         let c = ReadConditions {
             if_match: Some(vec!["nope".into()]),
             ..Default::default()
@@ -324,7 +362,10 @@ mod tests {
     #[test]
     fn formats() {
         assert_eq!(iso8601(1_255_369_830_000), "2009-10-12T17:50:30.000Z");
-        assert_eq!(http_date(1_255_369_830_000), "Mon, 12 Oct 2009 17:50:30 GMT");
+        assert_eq!(
+            http_date(1_255_369_830_000),
+            "Mon, 12 Oct 2009 17:50:30 GMT"
+        );
         assert_eq!(etag_list("\"a\", W/\"b\",*"), vec!["a", "b", "*"]);
     }
 }

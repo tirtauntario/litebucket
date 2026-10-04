@@ -153,11 +153,23 @@ pub fn string_to_sign(amz_date: &str, scope: &str, canonical_request: &str) -> S
     )
 }
 
-pub fn chunk_string_to_sign(amz_date: &str, scope: &str, prev_sig: &str, chunk_sha256_hex: &str) -> String {
-    format!("AWS4-HMAC-SHA256-PAYLOAD\n{amz_date}\n{scope}\n{prev_sig}\n{EMPTY_SHA256}\n{chunk_sha256_hex}")
+pub fn chunk_string_to_sign(
+    amz_date: &str,
+    scope: &str,
+    prev_sig: &str,
+    chunk_sha256_hex: &str,
+) -> String {
+    format!(
+        "AWS4-HMAC-SHA256-PAYLOAD\n{amz_date}\n{scope}\n{prev_sig}\n{EMPTY_SHA256}\n{chunk_sha256_hex}"
+    )
 }
 
-pub fn trailer_string_to_sign(amz_date: &str, scope: &str, prev_sig: &str, trailer_sha256_hex: &str) -> String {
+pub fn trailer_string_to_sign(
+    amz_date: &str,
+    scope: &str,
+    prev_sig: &str,
+    trailer_sha256_hex: &str,
+) -> String {
     format!("AWS4-HMAC-SHA256-TRAILER\n{amz_date}\n{scope}\n{prev_sig}\n{trailer_sha256_hex}")
 }
 
@@ -193,7 +205,10 @@ impl CredentialScope {
     }
 
     pub fn scope(&self) -> String {
-        format!("{}/{}/{}/aws4_request", self.date, self.region, self.service)
+        format!(
+            "{}/{}/{}/aws4_request",
+            self.date, self.region, self.service
+        )
     }
 }
 
@@ -217,7 +232,9 @@ impl AuthorizationHeader {
         let (mut cred, mut signed, mut sig) = (None, None, None);
         for part in rest.split(',') {
             let part = part.trim();
-            let (k, v) = part.split_once('=').ok_or("malformed authorization header")?;
+            let (k, v) = part
+                .split_once('=')
+                .ok_or("malformed authorization header")?;
             match k {
                 "Credential" => cred = Some(v),
                 "SignedHeaders" => signed = Some(v),
@@ -225,7 +242,8 @@ impl AuthorizationHeader {
                 _ => return Err("malformed authorization header"),
             }
         }
-        let credential = CredentialScope::parse(cred.ok_or("missing Credential")?).ok_or("malformed Credential")?;
+        let credential = CredentialScope::parse(cred.ok_or("missing Credential")?)
+            .ok_or("malformed Credential")?;
         let signed_headers = parse_signed_headers(signed.ok_or("missing SignedHeaders")?)?;
         let signature = sig.ok_or("missing Signature")?.to_string();
         Ok(Self {
@@ -238,9 +256,11 @@ impl AuthorizationHeader {
 
 pub fn parse_signed_headers(s: &str) -> Result<Vec<String>, &'static str> {
     let v: Vec<String> = s.split(';').map(|h| h.to_string()).collect();
-    if v.iter()
-        .any(|h| h.is_empty() || h.bytes().any(|b| b.is_ascii_uppercase() || b.is_ascii_whitespace()))
-    {
+    if v.iter().any(|h| {
+        h.is_empty()
+            || h.bytes()
+                .any(|b| b.is_ascii_uppercase() || b.is_ascii_whitespace())
+    }) {
         return Err("malformed SignedHeaders");
     }
     if !v.windows(2).all(|w| w[0] < w[1]) {
@@ -275,13 +295,30 @@ mod tests {
         h
     }
 
-    fn sign(method: &str, path: &str, query: &str, h: &http::HeaderMap, signed: &str, payload: &str) -> String {
+    fn sign(
+        method: &str,
+        path: &str,
+        query: &str,
+        h: &http::HeaderMap,
+        signed: &str,
+        payload: &str,
+    ) -> String {
         let signed_v: Vec<String> = signed.split(';').map(String::from).collect();
         let block = canonical_headers(h, &signed_v).unwrap();
         let uri = &canonical_uri_candidates(path)[0];
-        let cr = canonical_request(method, uri, &canonical_query(query, Some("X-Amz-Signature")), &block, signed, payload);
+        let cr = canonical_request(
+            method,
+            uri,
+            &canonical_query(query, Some("X-Amz-Signature")),
+            &block,
+            signed,
+            payload,
+        );
         let sts = string_to_sign(DATE, "20130524/us-east-1/s3/aws4_request", &cr);
-        hex::encode(hmac(&signing_key(SECRET, "20130524", "us-east-1", "s3"), sts.as_bytes()))
+        hex::encode(hmac(
+            &signing_key(SECRET, "20130524", "us-east-1", "s3"),
+            sts.as_bytes(),
+        ))
     }
 
     // Vectors from the Amazon S3 "Signature Calculations for the Authorization
@@ -296,7 +333,14 @@ mod tests {
             ("x-amz-date", DATE),
         ]);
         assert_eq!(
-            sign("GET", "/test.txt", "", &h, "host;range;x-amz-content-sha256;x-amz-date", EMPTY_SHA256),
+            sign(
+                "GET",
+                "/test.txt",
+                "",
+                &h,
+                "host;range;x-amz-content-sha256;x-amz-date",
+                EMPTY_SHA256
+            ),
             "f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"
         );
     }
@@ -304,7 +348,10 @@ mod tests {
     #[test]
     fn aws_put_object_vector() {
         let payload = sha256_hex(b"Welcome to Amazon S3.");
-        assert_eq!(payload, "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072");
+        assert_eq!(
+            payload,
+            "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072"
+        );
         let h = headers(&[
             ("date", "Fri, 24 May 2013 00:00:00 GMT"),
             ("host", "examplebucket.s3.amazonaws.com"),
@@ -372,18 +419,33 @@ mod tests {
             "content-encoding;content-length;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-storage-class",
             "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
         );
-        assert_eq!(seed, "4f232c4386841ef735655705268965c44a0e4690baa4adea153f7db9fa80a0a9");
+        assert_eq!(
+            seed,
+            "4f232c4386841ef735655705268965c44a0e4690baa4adea153f7db9fa80a0a9"
+        );
         let key = signing_key(SECRET, "20130524", "us-east-1", "s3");
         let scope = "20130524/us-east-1/s3/aws4_request";
         let chunk = |prev: &str, data: &[u8]| {
-            hex::encode(hmac(&key, chunk_string_to_sign(DATE, scope, prev, &sha256_hex(data)).as_bytes()))
+            hex::encode(hmac(
+                &key,
+                chunk_string_to_sign(DATE, scope, prev, &sha256_hex(data)).as_bytes(),
+            ))
         };
         let c1 = chunk(&seed, &vec![b'a'; 65536]);
-        assert_eq!(c1, "ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648");
+        assert_eq!(
+            c1,
+            "ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648"
+        );
         let c2 = chunk(&c1, &vec![b'a'; 1024]);
-        assert_eq!(c2, "0055627c9e194cb4542bae2aa5492e3c1575bbb81b612b7d234b86a503ef5497");
+        assert_eq!(
+            c2,
+            "0055627c9e194cb4542bae2aa5492e3c1575bbb81b612b7d234b86a503ef5497"
+        );
         let c3 = chunk(&c2, b"");
-        assert_eq!(c3, "b6c6ea8a5354eaf15b3cb7646744f4275b71ea724fed81ceb9323e279d449df9");
+        assert_eq!(
+            c3,
+            "b6c6ea8a5354eaf15b3cb7646744f4275b71ea724fed81ceb9323e279d449df9"
+        );
     }
 
     #[test]
@@ -392,28 +454,52 @@ mod tests {
         let key = signing_key(SECRET, "20130524", "us-east-1", "s3");
         let scope = "20130524/us-east-1/s3/aws4_request";
         let chunk = |prev: &str, data: &[u8]| {
-            hex::encode(hmac(&key, chunk_string_to_sign(DATE, scope, prev, &sha256_hex(data)).as_bytes()))
+            hex::encode(hmac(
+                &key,
+                chunk_string_to_sign(DATE, scope, prev, &sha256_hex(data)).as_bytes(),
+            ))
         };
         let c1 = chunk(
             "106e2a8a18243abcf37539882f36619c00e2dfc72633413f02d3b74544bfeb8e",
             &vec![b'a'; 65536],
         );
-        assert_eq!(c1, "b474d8862b1487a5145d686f57f013e54db672cee1c953b3010fb58501ef5aa2");
+        assert_eq!(
+            c1,
+            "b474d8862b1487a5145d686f57f013e54db672cee1c953b3010fb58501ef5aa2"
+        );
         let c2 = chunk(&c1, &vec![b'a'; 1024]);
-        assert_eq!(c2, "1c1344b170168f8e65b41376b44b20fe354e373826ccbbe2c1d40a8cae51e5c7");
+        assert_eq!(
+            c2,
+            "1c1344b170168f8e65b41376b44b20fe354e373826ccbbe2c1d40a8cae51e5c7"
+        );
         let c3 = chunk(&c2, b"");
-        assert_eq!(c3, "2ca2aba2005185cf7159c6277faf83795951dd77a3a99e6e65d5c9f85863f992");
+        assert_eq!(
+            c3,
+            "2ca2aba2005185cf7159c6277faf83795951dd77a3a99e6e65d5c9f85863f992"
+        );
         let trailer = sha256_hex(b"x-amz-checksum-crc32c:sOO8/Q==\n");
-        let t = hex::encode(hmac(&key, trailer_string_to_sign(DATE, scope, &c3, &trailer).as_bytes()));
-        assert_eq!(t, "d81f82fc3505edab99d459891051a732e8730629a2e4a59689829ca17fe2e435");
+        let t = hex::encode(hmac(
+            &key,
+            trailer_string_to_sign(DATE, scope, &c3, &trailer).as_bytes(),
+        ));
+        assert_eq!(
+            t,
+            "d81f82fc3505edab99d459891051a732e8730629a2e4a59689829ca17fe2e435"
+        );
     }
 
     #[test]
     fn uri_and_query_canonicalization() {
-        assert_eq!(canonical_uri_candidates("/a%20b/c+d/~x")[0], "/a%20b/c%2Bd/~x");
+        assert_eq!(
+            canonical_uri_candidates("/a%20b/c+d/~x")[0],
+            "/a%20b/c%2Bd/~x"
+        );
         assert_eq!(canonical_uri_candidates("//a/./../b/")[0], "//a/./../b/");
         assert_eq!(canonical_query("b=2&a=1&a=0&c", None), "a=0&a=1&b=2&c=");
-        assert_eq!(canonical_query("prefix=a%2Fb%20c", None), "prefix=a%2Fb%20c");
+        assert_eq!(
+            canonical_query("prefix=a%2Fb%20c", None),
+            "prefix=a%2Fb%20c"
+        );
         assert_eq!(canonical_header_value("  a   b  c "), "a b c");
     }
 

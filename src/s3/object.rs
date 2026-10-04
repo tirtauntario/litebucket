@@ -11,8 +11,8 @@ use http::{Response, StatusCode};
 
 use super::error::{S3Error, S3Result};
 use super::headers::{
-    self, CondResult, content_headers, evaluate, http_date, iso8601, quote_etag, read_conditions, response,
-    user_metadata, write_conditions, xml,
+    self, CondResult, content_headers, evaluate, http_date, iso8601, quote_etag, read_conditions,
+    response, user_metadata, write_conditions, xml,
 };
 use super::integrity::ChecksumRequest;
 use super::payload::Payload;
@@ -26,8 +26,8 @@ use crate::fsutil::Area;
 use crate::ids::BucketId;
 use crate::keys::ObjectKey;
 use crate::metadata::queries::{
-    self, BlobArea, ContentHeaders, DeleteOutcome, NewObject, ObjectCommit, ObjectRow, UserMetadata,
-    WriteConditions,
+    self, BlobArea, ContentHeaders, DeleteOutcome, NewObject, ObjectCommit, ObjectRow,
+    UserMetadata, WriteConditions,
 };
 use crate::metadata::{now_ms, with_named_write_tx};
 use crate::store::{CopySource, Reconciled, StagedBlob, Store, blocking};
@@ -52,7 +52,9 @@ pub fn commit_error(outcome: &ObjectCommit) -> S3Error {
     match outcome {
         ObjectCommit::NoSuchBucket => S3Error::no_such_bucket(),
         ObjectCommit::NoSuchKey => S3Error::no_such_key(),
-        ObjectCommit::PreconditionFailed => S3Error::precondition_failed().with_extra("Condition", "If-Match"),
+        ObjectCommit::PreconditionFailed => {
+            S3Error::precondition_failed().with_extra("Condition", "If-Match")
+        }
         ObjectCommit::QuotaExceeded => S3Error::quota_exceeded(),
         ObjectCommit::Committed { .. } => S3Error::internal(),
     }
@@ -84,13 +86,22 @@ pub async fn publish_and_commit(
                 now_ms: now_ms(),
             };
             let garbage_after = store.garbage_after();
-            let _guard = store.key_locks.lock((spec.bucket_id, spec.key.as_bytes().to_vec())).await;
+            let _guard = store
+                .key_locks
+                .lock((spec.bucket_id, spec.key.as_bytes().to_vec()))
+                .await;
             let res = store
                 .db
-                .write(move |c| with_named_write_tx(c, "object", |tx| queries::commit_object(tx, &new, &cond, garbage_after)))
+                .write(move |c| {
+                    with_named_write_tx(c, "object", |tx| {
+                        queries::commit_object(tx, &new, &cond, garbage_after)
+                    })
+                })
                 .await;
             match res {
-                Ok(ObjectCommit::Committed { last_modified_ms, .. }) => {
+                Ok(ObjectCommit::Committed {
+                    last_modified_ms, ..
+                }) => {
                     published.into_ticket().committed();
                     Ok(Committed { last_modified_ms })
                 }
@@ -99,12 +110,18 @@ pub async fn publish_and_commit(
                     Reconciled::Committed => {
                         published.into_ticket().committed();
                         let (b, k) = (spec.bucket_id, spec.key.as_bytes().to_vec());
-                        let row = store.db.read(move |c| queries::get_object(c, &b, &k)).await?;
+                        let row = store
+                            .db
+                            .read(move |c| queries::get_object(c, &b, &k))
+                            .await?;
                         Ok(Committed {
-                            last_modified_ms: row.map(|r| r.last_modified_ms).unwrap_or_else(now_ms),
+                            last_modified_ms: row
+                                .map(|r| r.last_modified_ms)
+                                .unwrap_or_else(now_ms),
                         })
                     }
-                    Reconciled::NotCommitted => Err(S3Error::internal().with_detail("commit failed (reconciled: not committed)")),
+                    Reconciled::NotCommitted => Err(S3Error::internal()
+                        .with_detail("commit failed (reconciled: not committed)")),
                     Reconciled::Unknown => {
                         published.into_ticket().leave_for_recovery();
                         store.halt("unreconciled metadata commit");
@@ -148,17 +165,24 @@ pub async fn put_object(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     let meta = user_metadata(&cx.req, store.config.limits.max_user_metadata_bytes)?;
     let cond = write_conditions(&cx.req)?;
     let integrity = ChecksumRequest::parse(&cx.req, &cx.auth.payload)?;
-    let len = payload_length(&cx.req, &cx.auth.payload)?.ok_or_else(S3Error::missing_content_length)?;
+    let len =
+        payload_length(&cx.req, &cx.auth.payload)?.ok_or_else(S3Error::missing_content_length)?;
     if len > store.config.limits.max_single_put_bytes {
         return Err(S3Error::entity_too_large()
             .with_extra("ProposedSize", len.to_string())
-            .with_extra("MaxSizeAllowed", store.config.limits.max_single_put_bytes.to_string()));
+            .with_extra(
+                "MaxSizeAllowed",
+                store.config.limits.max_single_put_bytes.to_string(),
+            ));
     }
     let bucket = cx.bucket().await?;
     let _permit = store.capacity.acquire(PermitKind::Upload).await?;
     let mut reservation = store.capacity.reserve(len)?;
     let ticket = store.new_blob(BlobArea::Object).await?;
-    let trailer = cx.req.header("x-amz-trailer")?.map(|t| t.trim().to_ascii_lowercase());
+    let trailer = cx
+        .req
+        .header("x-amz-trailer")?
+        .map(|t| t.trim().to_ascii_lowercase());
     let mut payload = Payload::new(
         body,
         cx.auth.payload.clone(),
@@ -202,9 +226,18 @@ fn missing_key(cx: &Cx, bucket: &str, key: &ObjectKey) -> S3Error {
     }
 }
 
-fn object_headers(row: &ObjectRow, out: &mut Vec<(String, String)>, overrides: &[(&'static str, String)]) {
+fn object_headers(
+    row: &ObjectRow,
+    out: &mut Vec<(String, String)>,
+    overrides: &[(&'static str, String)],
+) {
     let h = &row.headers;
-    let over = |name: &str| overrides.iter().find(|(k, _)| *k == name).map(|(_, v)| v.clone());
+    let over = |name: &str| {
+        overrides
+            .iter()
+            .find(|(k, _)| *k == name)
+            .map(|(_, v)| v.clone())
+    };
     out.push((
         "content-type".into(),
         over("content-type")
@@ -225,7 +258,11 @@ fn object_headers(row: &ObjectRow, out: &mut Vec<(String, String)>, overrides: &
     out.push(("etag".into(), quote_etag(&row.etag)));
     out.push(("last-modified".into(), http_date(row.last_modified_ms)));
     out.push(("accept-ranges".into(), "bytes".into()));
-    if let Some(parts) = row.etag.rsplit_once('-').and_then(|(_, n)| n.parse::<u32>().ok()) {
+    if let Some(parts) = row
+        .etag
+        .rsplit_once('-')
+        .and_then(|(_, n)| n.parse::<u32>().ok())
+    {
         out.push(("x-amz-mp-parts-count".into(), parts.to_string()));
     }
     for (k, v) in &row.user_metadata {
@@ -273,9 +310,15 @@ pub async fn get_object(cx: &Cx, head: bool) -> S3Result<Response<Body>> {
 
     // Select one committed generation and open it before releasing the guard.
     let (row, file) = {
-        let _guard = store.key_locks.lock((bucket.id, key.as_bytes().to_vec())).await;
+        let _guard = store
+            .key_locks
+            .lock((bucket.id, key.as_bytes().to_vec()))
+            .await;
         let (b, k) = (bucket.id, key.as_bytes().to_vec());
-        let row = store.db.read(move |c| queries::get_object(c, &b, &k)).await?;
+        let row = store
+            .db
+            .read(move |c| queries::get_object(c, &b, &k))
+            .await?;
         let Some(row) = row else {
             return Err(missing_key(cx, &bucket.name, &key));
         };
@@ -287,8 +330,13 @@ pub async fn get_object(cx: &Cx, head: bool) -> S3Result<Response<Body>> {
             match blocking(move || data.open_read(Area::Objects, &sid)).await {
                 Ok(f) => Some(f),
                 Err(e) => {
-                    store.integrity_fault(&format!("object file {} cannot be opened: {e}", row.storage_id));
-                    return Err(S3Error::internal().with_detail("referenced object file unavailable"));
+                    store.integrity_fault(&format!(
+                        "object file {} cannot be opened: {e}",
+                        row.storage_id
+                    ));
+                    return Err(
+                        S3Error::internal().with_detail("referenced object file unavailable")
+                    );
                 }
             }
         };
@@ -301,7 +349,9 @@ pub async fn get_object(cx: &Cx, head: bool) -> S3Result<Response<Body>> {
                 "object file {} has size {len}, expected {}",
                 row.storage_id, row.size
             ));
-            return Err(S3Error::internal().with_detail("referenced object file has unexpected size"));
+            return Err(
+                S3Error::internal().with_detail("referenced object file has unexpected size")
+            );
         }
     }
 
@@ -364,7 +414,10 @@ fn file_body(
     let stream = tokio_util::io::ReaderStream::with_capacity(reader, cap).map(move |chunk| {
         let _held = &permit;
         if let Ok(c) = &chunk {
-            store.metrics.bytes_sent.fetch_add(c.len() as u64, Ordering::Relaxed);
+            store
+                .metrics
+                .bytes_sent
+                .fetch_add(c.len() as u64, Ordering::Relaxed);
         }
         chunk
     });
@@ -376,7 +429,11 @@ pub async fn delete_object(cx: &Cx) -> S3Result<Response<Body>> {
     let bucket = cx.bucket().await?;
     let key = cx.req.object_key().clone();
     delete_one(&cx.store, bucket.id, &key).await?;
-    Ok(response(StatusCode::NO_CONTENT, Vec::<(&str, String)>::new(), Body::empty()))
+    Ok(response(
+        StatusCode::NO_CONTENT,
+        Vec::<(&str, String)>::new(),
+        Body::empty(),
+    ))
 }
 
 async fn delete_one(store: &Arc<Store>, bucket: BucketId, key: &ObjectKey) -> S3Result<()> {
@@ -385,7 +442,11 @@ async fn delete_one(store: &Arc<Store>, bucket: BucketId, key: &ObjectKey) -> S3
     let after = store.garbage_after();
     let res = store
         .db
-        .write(move |c| with_named_write_tx(c, "delete", |tx| queries::delete_object(tx, &bucket, &k, after)))
+        .write(move |c| {
+            with_named_write_tx(c, "delete", |tx| {
+                queries::delete_object(tx, &bucket, &k, after)
+            })
+        })
         .await?;
     match res {
         DeleteOutcome::NoSuchBucket => Err(S3Error::no_such_bucket()),
@@ -401,14 +462,19 @@ pub async fn delete_objects(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     if doc.name != "Delete" {
         return Err(S3Error::malformed_xml());
     }
-    let quiet = doc.child_text("Quiet").map(|v| v.trim() == "true").unwrap_or(false);
+    let quiet = doc
+        .child_text("Quiet")
+        .map(|v| v.trim() == "true")
+        .unwrap_or(false);
     let mut keys = Vec::new();
     for o in doc.children_named("Object") {
         let k = o.child_text("Key").ok_or_else(S3Error::malformed_xml)?;
         if let Some(v) = o.child_text("VersionId")
             && v != "null"
         {
-            return Err(S3Error::not_implemented("Object versioning is not supported by this service."));
+            return Err(S3Error::not_implemented(
+                "Object versioning is not supported by this service.",
+            ));
         }
         for c in &o.children {
             if !matches!(c.name.as_str(), "Key" | "VersionId") {
@@ -427,7 +493,8 @@ pub async fn delete_objects(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
         return Err(S3Error::malformed_xml().with_detail("too many keys"));
     }
     // Validate every key before mutating anything.
-    let parsed: Vec<Result<ObjectKey, &'static str>> = keys.iter().map(|k| ObjectKey::parse(k.clone())).collect();
+    let parsed: Vec<Result<ObjectKey, &'static str>> =
+        keys.iter().map(|k| ObjectKey::parse(k.clone())).collect();
     let bucket = cx.bucket().await?;
     let mut w = XmlWriter::new();
     w.root("DeleteResult");
@@ -474,16 +541,25 @@ fn parse_copy_source(v: &str) -> S3Result<(String, ObjectKey)> {
     if let Some(q) = query {
         match q.strip_prefix("versionId=") {
             Some("null") => {}
-            _ => return Err(S3Error::not_implemented("Copying a specific object version is not supported.")),
+            _ => {
+                return Err(S3Error::not_implemented(
+                    "Copying a specific object version is not supported.",
+                ));
+            }
         }
     }
     let decoded = crate::sigv4::percent_decode(path.strip_prefix('/').unwrap_or(path));
-    let decoded = String::from_utf8(decoded).map_err(|_| S3Error::invalid_argument("Invalid copy source encoding"))?;
-    let (b, k) = decoded
-        .split_once('/')
-        .ok_or_else(|| S3Error::invalid_argument("Copy Source must mention the source bucket and key: sourcebucket/sourcekey"))?;
+    let decoded = String::from_utf8(decoded)
+        .map_err(|_| S3Error::invalid_argument("Invalid copy source encoding"))?;
+    let (b, k) = decoded.split_once('/').ok_or_else(|| {
+        S3Error::invalid_argument(
+            "Copy Source must mention the source bucket and key: sourcebucket/sourcekey",
+        )
+    })?;
     if b.contains(':') || b.starts_with("arn") {
-        return Err(S3Error::not_implemented("Cross-service copy sources are not supported."));
+        return Err(S3Error::not_implemented(
+            "Cross-service copy sources are not supported.",
+        ));
     }
     let key = ObjectKey::parse(k.to_string()).map_err(S3Error::invalid_argument)?;
     Ok((b.to_string(), key))
@@ -492,7 +568,8 @@ fn parse_copy_source(v: &str) -> S3Result<(String, ObjectKey)> {
 pub async fn copy_object(cx: &Cx) -> S3Result<Response<Body>> {
     cx.require_object(Action::Write)?;
     let store = &cx.store;
-    let (src_bucket_name, src_key) = parse_copy_source(cx.req.header("x-amz-copy-source")?.unwrap_or(""))?;
+    let (src_bucket_name, src_key) =
+        parse_copy_source(cx.req.header("x-amz-copy-source")?.unwrap_or(""))?;
     if !cx
         .auth
         .credential
@@ -505,34 +582,58 @@ pub async fn copy_object(cx: &Cx) -> S3Result<Response<Body>> {
     let src_bucket = lookup_bucket(store, &src_bucket_name).await?;
     let src_conds = read_conditions(&cx.req, "x-amz-copy-source-")?;
     let cond = write_conditions(&cx.req)?;
-    let directive = cx.req.header("x-amz-metadata-directive")?.unwrap_or("COPY").to_string();
+    let directive = cx
+        .req
+        .header("x-amz-metadata-directive")?
+        .unwrap_or("COPY")
+        .to_string();
     if directive != "COPY" && directive != "REPLACE" {
         return Err(S3Error::invalid_argument("Unknown metadata directive."));
     }
     let requested_alg = match cx.req.header("x-amz-checksum-algorithm")? {
-        Some(a) => Some(Algorithm::parse(a).ok_or_else(|| S3Error::invalid_request("Invalid x-amz-checksum-algorithm"))?),
+        Some(a) => Some(
+            Algorithm::parse(a)
+                .ok_or_else(|| S3Error::invalid_request("Invalid x-amz-checksum-algorithm"))?,
+        ),
         None => None,
     };
     let _permit = store.capacity.acquire(PermitKind::Copy).await?;
 
     // Open one committed source generation under the source key guard only.
     let (src_row, src_file) = {
-        let _g = store.key_locks.lock((src_bucket.id, src_key.as_bytes().to_vec())).await;
+        let _g = store
+            .key_locks
+            .lock((src_bucket.id, src_key.as_bytes().to_vec()))
+            .await;
         let (b, k) = (src_bucket.id, src_key.as_bytes().to_vec());
-        let row = store.db.read(move |c| queries::get_object(c, &b, &k)).await?;
+        let row = store
+            .db
+            .read(move |c| queries::get_object(c, &b, &k))
+            .await?;
         let Some(row) = row else {
-            return Err(if cx.auth.credential.allows_list(&src_bucket.name, src_key.as_bytes()) {
-                S3Error::no_such_key()
-            } else {
-                S3Error::access_denied()
-            });
+            return Err(
+                if cx
+                    .auth
+                    .credential
+                    .allows_list(&src_bucket.name, src_key.as_bytes())
+                {
+                    S3Error::no_such_key()
+                } else {
+                    S3Error::access_denied()
+                },
+            );
         };
         let data = store.data.clone();
         let sid = row.storage_id;
-        let file = blocking(move || data.open_read(Area::Objects, &sid)).await.map_err(|e| {
-            store.integrity_fault(&format!("copy source {} cannot be opened: {e}", row.storage_id));
-            S3Error::internal()
-        })?;
+        let file = blocking(move || data.open_read(Area::Objects, &sid))
+            .await
+            .map_err(|e| {
+                store.integrity_fault(&format!(
+                    "copy source {} cannot be opened: {e}",
+                    row.storage_id
+                ));
+                S3Error::internal()
+            })?;
         (row, file)
     };
     match evaluate(&src_conds, &src_row.etag, src_row.last_modified_ms) {
@@ -566,10 +667,20 @@ pub async fn copy_object(cx: &Cx) -> S3Result<Response<Body>> {
     let _reservation = store.capacity.reserve(src_row.size)?;
     let ticket = store.new_blob(BlobArea::Object).await?;
     let alg = requested_alg
-        .or_else(|| src_row.checksum.as_ref().filter(|c| c.kind == ChecksumType::FullObject).map(|c| c.algorithm))
+        .or_else(|| {
+            src_row
+                .checksum
+                .as_ref()
+                .filter(|c| c.kind == ChecksumType::FullObject)
+                .map(|c| c.algorithm)
+        })
         .unwrap_or(Algorithm::Crc64Nvme);
     let received = store
-        .copy_into(ticket, vec![CopySource::File(src_file, src_row.size)], &[alg])
+        .copy_into(
+            ticket,
+            vec![CopySource::File(src_file, src_row.size)],
+            &[alg],
+        )
         .await?;
     // The copy must reproduce the source bytes exactly.
     let src_sha = {
@@ -586,7 +697,10 @@ pub async fn copy_object(cx: &Cx) -> S3Result<Response<Body>> {
             .await?
     };
     if src_sha.as_slice() != received.digests.sha256.as_slice() {
-        store.integrity_fault(&format!("copy source {} content does not match its digest", src_row.storage_id));
+        store.integrity_fault(&format!(
+            "copy source {} content does not match its digest",
+            src_row.storage_id
+        ));
         return Err(S3Error::internal().with_detail("copy source digest mismatch"));
     }
     let checksum = StoredChecksum::full(alg, received.digests.get(alg).unwrap_or_default());

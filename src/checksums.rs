@@ -93,7 +93,9 @@ impl Algorithm {
 
     pub fn supports(self, kind: ChecksumType) -> bool {
         match kind {
-            ChecksumType::FullObject => matches!(self, Self::Crc32 | Self::Crc32c | Self::Crc64Nvme),
+            ChecksumType::FullObject => {
+                matches!(self, Self::Crc32 | Self::Crc32c | Self::Crc64Nvme)
+            }
             ChecksumType::Composite => !matches!(self, Self::Crc64Nvme),
         }
     }
@@ -170,7 +172,9 @@ pub fn b64(bytes: &[u8]) -> String {
 
 /// Decode a base64 checksum and verify its length for the algorithm.
 pub fn decode_digest(alg: Algorithm, s: &str) -> Option<Vec<u8>> {
-    let v = base64::engine::general_purpose::STANDARD.decode(s.trim()).ok()?;
+    let v = base64::engine::general_purpose::STANDARD
+        .decode(s.trim())
+        .ok()?;
     (v.len() == alg.digest_len()).then_some(v)
 }
 
@@ -251,7 +255,10 @@ pub struct Digests {
 
 impl Digests {
     pub fn get(&self, alg: Algorithm) -> Option<&[u8]> {
-        self.checksums.iter().find(|(a, _)| *a == alg).map(|(_, d)| d.as_slice())
+        self.checksums
+            .iter()
+            .find(|(a, _)| *a == alg)
+            .map(|(_, d)| d.as_slice())
     }
 }
 
@@ -285,7 +292,11 @@ impl BodyHashes {
             len: self.len,
             md5: self.md5.finalize().into(),
             sha256: self.sha256.finalize().into(),
-            checksums: self.extra.into_iter().map(|(a, h)| (a, h.finalize())).collect(),
+            checksums: self
+                .extra
+                .into_iter()
+                .map(|(a, h)| (a, h.finalize()))
+                .collect(),
         }
     }
 }
@@ -305,7 +316,10 @@ mod tests {
         assert_eq!(hexval(Algorithm::Crc32), "cbf43926");
         assert_eq!(hexval(Algorithm::Crc32c), "e3069283");
         assert_eq!(hexval(Algorithm::Crc64Nvme), "ae8b14860a799888");
-        assert_eq!(hexval(Algorithm::Sha1), "f7c3bc1d808e04732adf679965ccc34ca7ae3441");
+        assert_eq!(
+            hexval(Algorithm::Sha1),
+            "f7c3bc1d808e04732adf679965ccc34ca7ae3441"
+        );
         assert_eq!(
             hexval(Algorithm::Sha256),
             "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225"

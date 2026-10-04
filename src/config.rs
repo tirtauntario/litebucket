@@ -328,10 +328,12 @@ impl Config {
     }
 
     pub fn http_listen(&self) -> Result<SocketAddr> {
-        self.http
-            .listen
-            .parse()
-            .map_err(|_| Error::config(format!("http.listen is not a socket address: {}", self.http.listen)))
+        self.http.listen.parse().map_err(|_| {
+            Error::config(format!(
+                "http.listen is not a socket address: {}",
+                self.http.listen
+            ))
+        })
     }
 
     pub fn management_listen(&self) -> Result<SocketAddr> {
@@ -363,7 +365,9 @@ impl Config {
         let listen = self.http_listen()?;
         let mgmt = self.management_listen()?;
         if listen.port() != 0 && listen == mgmt {
-            return Err(Error::config("management.listen must differ from http.listen"));
+            return Err(Error::config(
+                "management.listen must differ from http.listen",
+            ));
         }
 
         let h = &self.http;
@@ -395,7 +399,12 @@ impl Config {
                 ));
             }
         }
-        range("http.max_header_bytes", h.max_header_bytes as u64, 8 * 1024, 1024 * 1024)?;
+        range(
+            "http.max_header_bytes",
+            h.max_header_bytes as u64,
+            8 * 1024,
+            1024 * 1024,
+        )?;
         range("http.max_header_count", h.max_header_count as u64, 16, 1024)?;
         range(
             "http.max_request_target_bytes",
@@ -403,20 +412,55 @@ impl Config {
             1024,
             64 * 1024,
         )?;
-        range("http.header_timeout_seconds", h.header_timeout_seconds, 1, 600)?;
-        range("http.body_idle_timeout_seconds", h.body_idle_timeout_seconds, 1, 3600)?;
-        range("http.max_clock_skew_seconds", h.max_clock_skew_seconds, 60, 3600)?;
+        range(
+            "http.header_timeout_seconds",
+            h.header_timeout_seconds,
+            1,
+            600,
+        )?;
+        range(
+            "http.body_idle_timeout_seconds",
+            h.body_idle_timeout_seconds,
+            1,
+            3600,
+        )?;
+        range(
+            "http.max_clock_skew_seconds",
+            h.max_clock_skew_seconds,
+            60,
+            3600,
+        )?;
 
         let d = &self.database;
-        range("database.reader_connections", d.reader_connections as u64, 1, 32)?;
-        range("database.writer_queue_capacity", d.writer_queue_capacity as u64, 1, 65_536)?;
-        range("database.reader_queue_capacity", d.reader_queue_capacity as u64, 1, 65_536)?;
+        range(
+            "database.reader_connections",
+            d.reader_connections as u64,
+            1,
+            32,
+        )?;
+        range(
+            "database.writer_queue_capacity",
+            d.writer_queue_capacity as u64,
+            1,
+            65_536,
+        )?;
+        range(
+            "database.reader_queue_capacity",
+            d.reader_queue_capacity as u64,
+            1,
+            65_536,
+        )?;
         range("database.busy_timeout_ms", d.busy_timeout_ms, 100, 60_000)?;
         range("database.queue_wait_ms", d.queue_wait_ms, 10, 60_000)?;
 
         let l = &self.limits;
         range("limits.active_uploads", l.active_uploads as u64, 1, 4096)?;
-        range("limits.active_downloads", l.active_downloads as u64, 1, 16_384)?;
+        range(
+            "limits.active_downloads",
+            l.active_downloads as u64,
+            1,
+            16_384,
+        )?;
         range("limits.active_copies", l.active_copies as u64, 1, 1024)?;
         range(
             "limits.active_multipart_assemblies",
@@ -424,15 +468,32 @@ impl Config {
             1,
             1024,
         )?;
-        range("limits.max_single_put_bytes", l.max_single_put_bytes, 1, HARD_MAX_SINGLE_PUT_BYTES)?;
-        range("limits.max_part_bytes", l.max_part_bytes, MIN_PART_BYTES, HARD_MAX_PART_BYTES)?;
-        range("limits.max_object_bytes", l.max_object_bytes, 1, HARD_MAX_OBJECT_BYTES)?;
+        range(
+            "limits.max_single_put_bytes",
+            l.max_single_put_bytes,
+            1,
+            HARD_MAX_SINGLE_PUT_BYTES,
+        )?;
+        range(
+            "limits.max_part_bytes",
+            l.max_part_bytes,
+            MIN_PART_BYTES,
+            HARD_MAX_PART_BYTES,
+        )?;
+        range(
+            "limits.max_object_bytes",
+            l.max_object_bytes,
+            1,
+            HARD_MAX_OBJECT_BYTES,
+        )?;
         if l.max_object_bytes < l.max_single_put_bytes {
             return Err(Error::config(
                 "limits.max_object_bytes must be at least limits.max_single_put_bytes",
             ));
         }
-        let part_capacity = l.max_part_bytes.checked_mul(u64::from(self.multipart.max_parts));
+        let part_capacity = l
+            .max_part_bytes
+            .checked_mul(u64::from(self.multipart.max_parts));
         if part_capacity.is_some_and(|c| c < l.max_object_bytes) {
             return Err(Error::config(
                 "limits.max_object_bytes exceeds multipart.max_parts * limits.max_part_bytes",
@@ -443,12 +504,37 @@ impl Config {
                 "limits.max_temporary_bytes must hold at least one maximum part or single PUT",
             ));
         }
-        range("limits.min_disk_free_percent", l.min_disk_free_percent, 0, 50)?;
+        range(
+            "limits.min_disk_free_percent",
+            l.min_disk_free_percent,
+            0,
+            50,
+        )?;
         range("limits.max_buckets", l.max_buckets, 1, 1_000_000)?;
-        range("limits.max_listing_entries", l.max_listing_entries as u64, 1, 1000)?;
-        range("limits.max_delete_entries", l.max_delete_entries as u64, 1, 1000)?;
-        range("limits.max_xml_body_bytes", l.max_xml_body_bytes as u64, 64 * 1024, 64 * 1024 * 1024)?;
-        range("limits.max_cors_body_bytes", l.max_cors_body_bytes as u64, 1024, 1024 * 1024)?;
+        range(
+            "limits.max_listing_entries",
+            l.max_listing_entries as u64,
+            1,
+            1000,
+        )?;
+        range(
+            "limits.max_delete_entries",
+            l.max_delete_entries as u64,
+            1,
+            1000,
+        )?;
+        range(
+            "limits.max_xml_body_bytes",
+            l.max_xml_body_bytes as u64,
+            64 * 1024,
+            64 * 1024 * 1024,
+        )?;
+        range(
+            "limits.max_cors_body_bytes",
+            l.max_cors_body_bytes as u64,
+            1024,
+            1024 * 1024,
+        )?;
         range(
             "limits.max_user_metadata_bytes",
             l.max_user_metadata_bytes as u64,
@@ -461,23 +547,72 @@ impl Config {
             4 * 1024,
             8 * 1024 * 1024,
         )?;
-        range("limits.admission_timeout_ms", l.admission_timeout_ms, 0, 120_000)?;
+        range(
+            "limits.admission_timeout_ms",
+            l.admission_timeout_ms,
+            0,
+            120_000,
+        )?;
 
         let m = &self.multipart;
-        range("multipart.max_active_uploads", m.max_active_uploads, 1, 1_000_000)?;
-        range("multipart.max_parts", u64::from(m.max_parts), 1, u64::from(HARD_MAX_PARTS))?;
-        range("multipart.inactive_expiration_seconds", m.inactive_expiration_seconds, 60, 365 * 24 * 3600)?;
-        range("multipart.receipt_retention_seconds", m.receipt_retention_seconds, 0, 30 * 24 * 3600)?;
+        range(
+            "multipart.max_active_uploads",
+            m.max_active_uploads,
+            1,
+            1_000_000,
+        )?;
+        range(
+            "multipart.max_parts",
+            u64::from(m.max_parts),
+            1,
+            u64::from(HARD_MAX_PARTS),
+        )?;
+        range(
+            "multipart.inactive_expiration_seconds",
+            m.inactive_expiration_seconds,
+            60,
+            365 * 24 * 3600,
+        )?;
+        range(
+            "multipart.receipt_retention_seconds",
+            m.receipt_retention_seconds,
+            0,
+            30 * 24 * 3600,
+        )?;
 
         let mt = &self.maintenance;
-        range("maintenance.garbage_batch_size", mt.garbage_batch_size as u64, 1, 10_000)?;
-        range("maintenance.garbage_grace_seconds", mt.garbage_grace_seconds, 0, 7 * 24 * 3600)?;
-        range("maintenance.garbage_interval_seconds", mt.garbage_interval_seconds, 1, 24 * 3600)?;
-        range("maintenance.shutdown_grace_seconds", mt.shutdown_grace_seconds, 1, 3600)?;
+        range(
+            "maintenance.garbage_batch_size",
+            mt.garbage_batch_size as u64,
+            1,
+            10_000,
+        )?;
+        range(
+            "maintenance.garbage_grace_seconds",
+            mt.garbage_grace_seconds,
+            0,
+            7 * 24 * 3600,
+        )?;
+        range(
+            "maintenance.garbage_interval_seconds",
+            mt.garbage_interval_seconds,
+            1,
+            24 * 3600,
+        )?;
+        range(
+            "maintenance.shutdown_grace_seconds",
+            mt.shutdown_grace_seconds,
+            1,
+            3600,
+        )?;
 
         match self.logging.format.as_str() {
             "json" | "text" => {}
-            other => return Err(Error::config(format!("logging.format must be json or text, not {other}"))),
+            other => {
+                return Err(Error::config(format!(
+                    "logging.format must be json or text, not {other}"
+                )));
+            }
         }
         tracing_subscriber::EnvFilter::try_new(&self.logging.level)
             .map_err(|e| Error::config(format!("invalid logging.level: {e}")))?;

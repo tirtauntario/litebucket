@@ -98,7 +98,10 @@ pub fn initialize(config: &Config) -> Result<StoreMeta> {
 /// Open a locked data directory and its metadata for offline maintenance or
 /// serving: verifies format/region, applies compatible migrations (when
 /// `migrate`), checks integrity. Does not run recovery.
-pub fn open_offline(config: &Config, migrate: bool) -> Result<(DataDir, rusqlite::Connection, StoreMeta, usize)> {
+pub fn open_offline(
+    config: &Config,
+    migrate: bool,
+) -> Result<(DataDir, rusqlite::Connection, StoreMeta, usize)> {
     metadata::check_sqlite_runtime()?;
     let data = DataDir::open(&config.data_dir)?;
     let db_path = data.db_path();
@@ -111,7 +114,9 @@ pub fn open_offline(config: &Config, migrate: bool) -> Result<(DataDir, rusqlite
     let conn = metadata::open_connection(&db_path, Role::Writer, config.database.busy_timeout_ms)?;
     let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
     if check != "ok" {
-        return Err(Error::integrity(format!("metadata quick_check failed: {check}")));
+        return Err(Error::integrity(format!(
+            "metadata quick_check failed: {check}"
+        )));
     }
     let applied = if migrate {
         migrations::apply(&conn)?
@@ -211,7 +216,9 @@ impl Store {
     }
 
     pub fn garbage_after(&self) -> i64 {
-        now_ms().saturating_add((self.config.maintenance.garbage_grace_seconds as i64).saturating_mul(1000))
+        now_ms().saturating_add(
+            (self.config.maintenance.garbage_grace_seconds as i64).saturating_mul(1000),
+        )
     }
 
     /// Stop accepting mutations and automatic cleanup until an operator
@@ -226,7 +233,10 @@ impl Store {
     }
 
     pub fn halted_reason(&self) -> Option<String> {
-        self.halted.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.halted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn check_writable(&self) -> S3Result<()> {
@@ -239,7 +249,9 @@ impl Store {
     /// Record a storage-integrity fault (missing/corrupt referenced file, etc.).
     pub fn integrity_fault(&self, what: &str) {
         self.integrity_failed.store(true, Ordering::SeqCst);
-        self.metrics.integrity_errors.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .integrity_errors
+            .fetch_add(1, Ordering::Relaxed);
         tracing::error!(event = "integrity_failure", detail = %what, "storage integrity failure");
     }
 
@@ -248,7 +260,10 @@ impl Store {
     }
 
     pub fn is_blob_active(&self, id: &StorageId) -> bool {
-        self.active_blobs.lock().unwrap_or_else(|e| e.into_inner()).contains(id)
+        self.active_blobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(id)
     }
 
     /// Mark an upload as having in-flight work (protects it from expiry).
@@ -313,7 +328,11 @@ impl Store {
             let now = now_ms();
             let registered = self
                 .db
-                .write(move |c| with_named_write_tx(c, "register", |tx| queries::register_blob(tx, &id, area, now)))
+                .write(move |c| {
+                    with_named_write_tx(c, "register", |tx| {
+                        queries::register_blob(tx, &id, area, now)
+                    })
+                })
                 .await?;
             if !registered {
                 tracing::warn!(event = "id_collision", storage_id = %id, "tracked storage ID collision; retrying");
@@ -359,12 +378,18 @@ impl Store {
         let file = match blocking(move || data.create_staging(&id)).await {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                return Err(self.quarantine(ticket, "staging path appeared after registration").await);
+                return Err(self
+                    .quarantine(ticket, "staging path appeared after registration")
+                    .await);
             }
             Err(e) => return Err(self.io_failure(e)),
         };
         let buf_target = self.config.limits.transfer_buffer_bytes;
-        let mut state = Some((file, BodyHashes::new(algorithms), BytesMut::with_capacity(buf_target)));
+        let mut state = Some((
+            file,
+            BodyHashes::new(algorithms),
+            BytesMut::with_capacity(buf_target),
+        ));
         let mut total: u64 = 0;
         loop {
             let chunk = src.next_chunk().await?;
@@ -403,7 +428,9 @@ impl Store {
             }
         }
         let (file, hashes, _) = state.take().expect("writer state");
-        self.metrics.bytes_received.fetch_add(total, Ordering::Relaxed);
+        self.metrics
+            .bytes_received
+            .fetch_add(total, Ordering::Relaxed);
         crate::failpoint::hit("after_body_received");
         Ok(ReceivedBlob {
             ticket,
@@ -439,7 +466,9 @@ impl Store {
         let file = match blocking(move || data.create_staging(&id)).await {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                return Err(self.quarantine(ticket, "staging path appeared after registration").await);
+                return Err(self
+                    .quarantine(ticket, "staging path appeared after registration")
+                    .await);
             }
             Err(e) => return Err(self.io_failure(e)),
         };
@@ -455,10 +484,18 @@ impl Store {
             for source in sources {
                 let (mut src, expected, md5) = match source {
                     CopySource::File(f, size) => (f, size, None),
-                    CopySource::Tracked { area, id, size, md5 } => (data.open_read(area, &id)?, size, md5),
+                    CopySource::Tracked {
+                        area,
+                        id,
+                        size,
+                        md5,
+                    } => (data.open_read(area, &id)?, size, md5),
                 };
                 if crate::fsutil::file_len(&src)? != expected {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "source file size differs from metadata"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "source file size differs from metadata",
+                    ));
                 }
                 let mut part_md5 = md5.map(|_| <md5::Md5 as sha2::Digest>::new());
                 let mut remaining = expected;
@@ -466,7 +503,10 @@ impl Store {
                     let want = remaining.min(buf.len() as u64) as usize;
                     let n = io::Read::read(&mut src, &mut buf[..want])?;
                     if n == 0 {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, "source file shorter than recorded size"));
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "source file shorter than recorded size",
+                        ));
                     }
                     crate::failpoint::io("write")?;
                     hashes.update(&buf[..n]);
@@ -479,7 +519,10 @@ impl Store {
                 if let (Some(h), Some(want)) = (part_md5, md5) {
                     let got: [u8; 16] = sha2::Digest::finalize(h).into();
                     if got != want {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, "source file content differs from its recorded MD5"));
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "source file content differs from its recorded MD5",
+                        ));
                     }
                 }
             }
@@ -492,7 +535,11 @@ impl Store {
             }
             self.io_failure(e)
         })?;
-        Ok(ReceivedBlob { ticket, file, digests })
+        Ok(ReceivedBlob {
+            ticket,
+            file,
+            digests,
+        })
     }
 
     /// Late collision: preserve the preexisting path, remove only our own
@@ -565,7 +612,10 @@ impl ActiveGuard {
 
 impl Drop for ActiveInner {
     fn drop(&mut self) {
-        self.set.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id);
+        self.set
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.id);
     }
 }
 
@@ -650,7 +700,11 @@ impl ReceivedBlob {
 
     /// Flush and synchronize the staging file contents.
     pub async fn sync(self) -> S3Result<StagedBlob> {
-        let ReceivedBlob { ticket, file, digests } = self;
+        let ReceivedBlob {
+            ticket,
+            file,
+            digests,
+        } = self;
         let keep = ticket.guard.clone();
         let store = ticket.store.clone();
         let res = blocking(move || {
@@ -698,7 +752,9 @@ impl StagedBlob {
                 // Remove only our own staging file, then drop our tracking.
                 let data = store.data.clone();
                 let _ = blocking(move || data.remove(Area::Staging, &id).map(|_| ())).await;
-                Err(store.quarantine(ticket, "final path already occupied at publication").await)
+                Err(store
+                    .quarantine(ticket, "final path already occupied at publication")
+                    .await)
             }
             Err(e) => Err(store.io_failure(e)),
         }

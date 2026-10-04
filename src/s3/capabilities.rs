@@ -205,7 +205,9 @@ pub fn resolve(req: &S3Request) -> S3Result<Op> {
         (Some(_), Some(_)) => match *m {
             Method::PUT if req.has_q("uploadId") || req.has_q("partNumber") => {
                 if req.headers.contains_key("x-amz-copy-source") {
-                    return Err(S3Error::not_implemented("UploadPartCopy is not supported by this service."));
+                    return Err(S3Error::not_implemented(
+                        "UploadPartCopy is not supported by this service.",
+                    ));
                 }
                 Op::UploadPart
             }
@@ -226,7 +228,12 @@ pub fn resolve(req: &S3Request) -> S3Result<Op> {
 
 fn allowed_params(op: Op) -> &'static [&'static str] {
     match op {
-        Op::ListBuckets => &["max-buckets", "continuation-token", "prefix", "bucket-region"],
+        Op::ListBuckets => &[
+            "max-buckets",
+            "continuation-token",
+            "prefix",
+            "bucket-region",
+        ],
         Op::ListObjectsV2 => &[
             "list-type",
             "prefix",
@@ -255,7 +262,12 @@ fn allowed_params(op: Op) -> &'static [&'static str] {
         Op::UploadPart => &["partNumber", "uploadId"],
         Op::CompleteMultipartUpload | Op::AbortMultipartUpload => &["uploadId"],
         Op::ListParts => &["uploadId", "max-parts", "part-number-marker"],
-        Op::CreateBucket | Op::HeadBucket | Op::DeleteBucket | Op::PutObject | Op::CopyObject | Op::Preflight => &[],
+        Op::CreateBucket
+        | Op::HeadBucket
+        | Op::DeleteBucket
+        | Op::PutObject
+        | Op::CopyObject
+        | Op::Preflight => &[],
     }
 }
 
@@ -281,13 +293,20 @@ fn op_headers(op: Op) -> &'static [&'static str] {
             "x-amz-checksum-type",
         ],
         Op::CompleteMultipartUpload => &["x-amz-checksum-type", "x-amz-mp-object-size"],
-        Op::CreateBucket => &["x-amz-acl", "x-amz-object-ownership", "x-amz-bucket-object-lock-enabled"],
+        Op::CreateBucket => &[
+            "x-amz-acl",
+            "x-amz-object-ownership",
+            "x-amz-bucket-object-lock-enabled",
+        ],
         _ => &[],
     }
 }
 
 fn takes_metadata(op: Op) -> bool {
-    matches!(op, Op::PutObject | Op::CopyObject | Op::CreateMultipartUpload)
+    matches!(
+        op,
+        Op::PutObject | Op::CopyObject | Op::CreateMultipartUpload
+    )
 }
 
 /// Headers valid on any request; integrity headers are checked by the
@@ -310,7 +329,9 @@ const GLOBAL_HEADERS: &[&str] = &[
 ];
 
 fn unsupported_header_message(name: &str) -> Option<&'static str> {
-    if name.starts_with("x-amz-server-side-encryption") || name.starts_with("x-amz-copy-source-server-side-encryption") {
+    if name.starts_with("x-amz-server-side-encryption")
+        || name.starts_with("x-amz-copy-source-server-side-encryption")
+    {
         Some("Server-side encryption is not supported by this service.")
     } else if name.starts_with("x-amz-object-lock") || name == "x-amz-bypass-governance-retention" {
         Some("Object Lock and retention are not supported by this service.")
@@ -336,15 +357,20 @@ pub fn validate(req: &S3Request, op: Op, owner_id: &str) -> S3Result<()> {
         let ok = params.contains(&k.as_str())
             || k == "x-id"
             || PRESIGN_PARAMS.contains(&k.as_str())
-            || (matches!(op, Op::GetObject | Op::HeadObject) && RESPONSE_OVERRIDES.contains(&k.as_str()));
+            || (matches!(op, Op::GetObject | Op::HeadObject)
+                && RESPONSE_OVERRIDES.contains(&k.as_str()));
         if !ok {
-            return Err(S3Error::invalid_argument(format!("Unsupported query parameter: {k}")));
+            return Err(S3Error::invalid_argument(format!(
+                "Unsupported query parameter: {k}"
+            )));
         }
     }
     if let Some(v) = req.q("versionId")
         && v != "null"
     {
-        return Err(S3Error::not_implemented("Object versioning is not supported by this service."));
+        return Err(S3Error::not_implemented(
+            "Object versioning is not supported by this service.",
+        ));
     }
     if req.has_q("partNumber") && matches!(op, Op::GetObject | Op::HeadObject) {
         return Err(S3Error::not_implemented(
@@ -357,13 +383,19 @@ pub fn validate(req: &S3Request, op: Op, owner_id: &str) -> S3Result<()> {
         if !n.starts_with("x-amz-") {
             continue;
         }
-        if GLOBAL_HEADERS.contains(&n) || specific.contains(&n) || (takes_metadata(op) && n.starts_with("x-amz-meta-")) {
+        if GLOBAL_HEADERS.contains(&n)
+            || specific.contains(&n)
+            || (takes_metadata(op) && n.starts_with("x-amz-meta-"))
+        {
             continue;
         }
         if let Some(msg) = unsupported_header_message(n) {
             return Err(S3Error::not_implemented(msg));
         }
-        return Err(S3Error::not_implemented(format!("The {n} header is not supported for {}.", op.name())));
+        return Err(S3Error::not_implemented(format!(
+            "The {n} header is not supported for {}.",
+            op.name()
+        )));
     }
     if let Some(owner) = req.header("x-amz-expected-bucket-owner")?
         && owner != owner_id
@@ -389,12 +421,16 @@ pub fn validate(req: &S3Request, op: Op, owner_id: &str) -> S3Result<()> {
     if let Some(v) = req.header("x-amz-object-ownership")?
         && v != "BucketOwnerEnforced"
     {
-        return Err(S3Error::not_implemented("Only BucketOwnerEnforced object ownership is supported."));
+        return Err(S3Error::not_implemented(
+            "Only BucketOwnerEnforced object ownership is supported.",
+        ));
     }
     if let Some(v) = req.header("x-amz-bucket-object-lock-enabled")?
         && !v.eq_ignore_ascii_case("false")
     {
-        return Err(S3Error::not_implemented("Object Lock is not supported by this service."));
+        return Err(S3Error::not_implemented(
+            "Object Lock is not supported by this service.",
+        ));
     }
     if let Some(v) = req.header("x-amz-request-payer")?
         && v != "requester"
@@ -402,16 +438,24 @@ pub fn validate(req: &S3Request, op: Op, owner_id: &str) -> S3Result<()> {
         return Err(S3Error::invalid_argument("invalid x-amz-request-payer"));
     }
     // Conditional headers this service does not implement for writes.
-    if matches!(op, Op::PutObject | Op::CopyObject | Op::CompleteMultipartUpload) {
+    if matches!(
+        op,
+        Op::PutObject | Op::CopyObject | Op::CompleteMultipartUpload
+    ) {
         for h in ["if-modified-since", "if-unmodified-since"] {
             if req.headers.contains_key(h) {
-                return Err(S3Error::not_implemented(format!("{h} is not supported for {}.", op.name())));
+                return Err(S3Error::not_implemented(format!(
+                    "{h} is not supported for {}.",
+                    op.name()
+                )));
             }
         }
         if let Some(v) = req.header("if-none-match")?
             && v.trim() != "*"
         {
-            return Err(S3Error::not_implemented("If-None-Match only supports '*' for writes."));
+            return Err(S3Error::not_implemented(
+                "If-None-Match only supports '*' for writes.",
+            ));
         }
     }
     Ok(())
@@ -424,7 +468,10 @@ mod tests {
     fn req(method: &str, uri: &str, headers: &[(&str, &str)]) -> S3Request {
         let mut h = http::HeaderMap::new();
         for (k, v) in headers {
-            h.insert(http::HeaderName::from_bytes(k.as_bytes()).unwrap(), v.parse().unwrap());
+            h.insert(
+                http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
         }
         S3Request::parse(
             "id".into(),
@@ -437,24 +484,59 @@ mod tests {
 
     #[test]
     fn subresources_dispatch_before_ordinary_operations() {
-        assert_eq!(resolve(&req("PUT", "/b/k?partNumber=1&uploadId=x", &[])).unwrap(), Op::UploadPart);
-        assert_eq!(resolve(&req("PUT", "/b/k", &[("x-amz-copy-source", "/b/x")])).unwrap(), Op::CopyObject);
+        assert_eq!(
+            resolve(&req("PUT", "/b/k?partNumber=1&uploadId=x", &[])).unwrap(),
+            Op::UploadPart
+        );
+        assert_eq!(
+            resolve(&req("PUT", "/b/k", &[("x-amz-copy-source", "/b/x")])).unwrap(),
+            Op::CopyObject
+        );
         assert_eq!(resolve(&req("PUT", "/b/k", &[])).unwrap(), Op::PutObject);
-        assert_eq!(resolve(&req("GET", "/b?list-type=2", &[])).unwrap(), Op::ListObjectsV2);
-        assert_eq!(resolve(&req("POST", "/b?delete", &[])).unwrap(), Op::DeleteObjects);
-        assert_eq!(resolve(&req("POST", "/b/k?uploads", &[])).unwrap(), Op::CreateMultipartUpload);
-        assert_eq!(resolve(&req("DELETE", "/b/k?uploadId=x", &[])).unwrap(), Op::AbortMultipartUpload);
-        for uri in ["/b/k?acl", "/b?versioning", "/b/k?tagging", "/b/k?retention", "/b?policy"] {
+        assert_eq!(
+            resolve(&req("GET", "/b?list-type=2", &[])).unwrap(),
+            Op::ListObjectsV2
+        );
+        assert_eq!(
+            resolve(&req("POST", "/b?delete", &[])).unwrap(),
+            Op::DeleteObjects
+        );
+        assert_eq!(
+            resolve(&req("POST", "/b/k?uploads", &[])).unwrap(),
+            Op::CreateMultipartUpload
+        );
+        assert_eq!(
+            resolve(&req("DELETE", "/b/k?uploadId=x", &[])).unwrap(),
+            Op::AbortMultipartUpload
+        );
+        for uri in [
+            "/b/k?acl",
+            "/b?versioning",
+            "/b/k?tagging",
+            "/b/k?retention",
+            "/b?policy",
+        ] {
             let m = if uri.contains('?') { "PUT" } else { "GET" };
-            assert_eq!(resolve(&req(m, uri, &[])).unwrap_err().code, "NotImplemented", "{uri}");
+            assert_eq!(
+                resolve(&req(m, uri, &[])).unwrap_err().code,
+                "NotImplemented",
+                "{uri}"
+            );
         }
         assert_eq!(
-            resolve(&req("PUT", "/b/k?partNumber=1&uploadId=x", &[("x-amz-copy-source", "/b/x")]))
-                .unwrap_err()
-                .code,
+            resolve(&req(
+                "PUT",
+                "/b/k?partNumber=1&uploadId=x",
+                &[("x-amz-copy-source", "/b/x")]
+            ))
+            .unwrap_err()
+            .code,
             "NotImplemented"
         );
-        assert_eq!(resolve(&req("GET", "/b", &[])).unwrap_err().code, "NotImplemented");
+        assert_eq!(
+            resolve(&req("GET", "/b", &[])).unwrap_err().code,
+            "NotImplemented"
+        );
     }
 
     #[test]
@@ -475,7 +557,11 @@ mod tests {
         let ok = req(
             "PUT",
             "/b/k?x-id=PutObject",
-            &[("x-amz-acl", "private"), ("x-amz-meta-a", "1"), ("x-amz-storage-class", "STANDARD")],
+            &[
+                ("x-amz-acl", "private"),
+                ("x-amz-meta-a", "1"),
+                ("x-amz-storage-class", "STANDARD"),
+            ],
         );
         validate(&ok, Op::PutObject, &o).unwrap();
         let bad = req("PUT", "/b/k?foo=1", &[]);
@@ -487,6 +573,9 @@ mod tests {
         let v = req("GET", "/b/k?versionId=null", &[]);
         validate(&v, Op::GetObject, &o).unwrap();
         let owner = req("GET", "/b/k", &[("x-amz-expected-bucket-owner", "123")]);
-        assert_eq!(validate(&owner, Op::GetObject, &o).unwrap_err().code, "AccessDenied");
+        assert_eq!(
+            validate(&owner, Op::GetObject, &o).unwrap_err().code,
+            "AccessDenied"
+        );
     }
 }

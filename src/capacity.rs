@@ -91,7 +91,9 @@ impl Capacity {
             Ok(Ok(p)) => Ok(p),
             Ok(Err(_)) => Err(Error::Overloaded("service is shutting down")),
             Err(_) => {
-                self.stats.rejected_admissions.fetch_add(1, Ordering::Relaxed);
+                self.stats
+                    .rejected_admissions
+                    .fetch_add(1, Ordering::Relaxed);
                 Err(Error::Overloaded(match kind {
                     PermitKind::Upload => "too many concurrent uploads",
                     PermitKind::Download => "too many concurrent downloads",
@@ -120,12 +122,20 @@ impl Capacity {
     /// Check that `extra` more bytes can be written while keeping the reserve.
     fn check(&self, extra: u64) -> std::result::Result<(), CapacityError> {
         let reserved = self.reserved.load(Ordering::Acquire);
-        let temp = self.part_bytes.load(Ordering::Acquire).saturating_add(reserved);
+        let temp = self
+            .part_bytes
+            .load(Ordering::Acquire)
+            .saturating_add(reserved);
         if temp.saturating_add(extra) > self.limits.max_temporary_bytes {
             return Err(CapacityError::TemporaryLimit);
         }
-        let st = self.data.fs_stats().map_err(|_| CapacityError::DiskReserve)?;
-        let needed = reserved.saturating_add(extra).saturating_add(self.floor(&st));
+        let st = self
+            .data
+            .fs_stats()
+            .map_err(|_| CapacityError::DiskReserve)?;
+        let needed = reserved
+            .saturating_add(extra)
+            .saturating_add(self.floor(&st));
         if st.avail_bytes < needed {
             return Err(CapacityError::DiskReserve);
         }
@@ -173,7 +183,9 @@ impl Capacity {
     pub fn release_part_bytes(&self, n: u64) {
         let _ = self
             .part_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| Some(v.saturating_sub(n)));
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+                Some(v.saturating_sub(n))
+            });
     }
 
     pub fn part_bytes(&self) -> u64 {
@@ -279,7 +291,10 @@ mod tests {
         };
         let (_t, c) = cap(limits);
         let _p = c.acquire(PermitKind::Upload).await.unwrap();
-        assert!(matches!(c.acquire(PermitKind::Upload).await, Err(Error::Overloaded(_))));
+        assert!(matches!(
+            c.acquire(PermitKind::Upload).await,
+            Err(Error::Overloaded(_))
+        ));
         assert_eq!(c.in_use(PermitKind::Upload), 1);
     }
 }

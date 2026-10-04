@@ -67,8 +67,18 @@ impl S3Error {
     }
 
     ctor!(access_denied, "AccessDenied", FORBIDDEN, "Access Denied");
-    ctor!(no_such_bucket, "NoSuchBucket", NOT_FOUND, "The specified bucket does not exist");
-    ctor!(no_such_key, "NoSuchKey", NOT_FOUND, "The specified key does not exist.");
+    ctor!(
+        no_such_bucket,
+        "NoSuchBucket",
+        NOT_FOUND,
+        "The specified bucket does not exist"
+    );
+    ctor!(
+        no_such_key,
+        "NoSuchKey",
+        NOT_FOUND,
+        "The specified key does not exist."
+    );
     ctor!(
         no_such_upload,
         "NoSuchUpload",
@@ -253,11 +263,17 @@ impl S3Error {
     }
 
     pub fn insufficient_capacity() -> Self {
-        Self::service_unavailable("The server does not currently have enough storage capacity for this request.")
+        Self::service_unavailable(
+            "The server does not currently have enough storage capacity for this request.",
+        )
     }
 
     pub fn authorization_query_error(msg: impl Into<String>) -> Self {
-        Self::new("AuthorizationQueryParametersError", StatusCode::BAD_REQUEST, msg)
+        Self::new(
+            "AuthorizationQueryParametersError",
+            StatusCode::BAD_REQUEST,
+            msg,
+        )
     }
 
     pub fn authorization_header_malformed(msg: impl Into<String>) -> Self {
@@ -273,7 +289,8 @@ impl From<Error> for S3Error {
         match e {
             Error::Overloaded(what) => S3Error::slow_down().with_detail(what),
             Error::Halted(why) => {
-                S3Error::service_unavailable("The service is temporarily refusing writes.").with_detail(why)
+                S3Error::service_unavailable("The service is temporarily refusing writes.")
+                    .with_detail(why)
             }
             other => S3Error::internal().with_detail(other.to_string()),
         }

@@ -96,8 +96,8 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_ws();
             let r = self.rest();
-            if r.starts_with("<!--") {
-                let end = r[4..].find("-->").ok_or_else(malformed)?;
+            if let Some(body) = r.strip_prefix("<!--") {
+                let end = body.find("-->").ok_or_else(malformed)?;
                 self.pos += 4 + end + 3;
             } else if r.starts_with("<!") {
                 // DOCTYPE / ENTITY declarations are never accepted.
@@ -195,8 +195,8 @@ impl<'a> Parser<'a> {
                     el.text.clear();
                 }
                 return Ok(el);
-            } else if r.starts_with("<!--") {
-                let end = r[4..].find("-->").ok_or_else(malformed)?;
+            } else if let Some(body) = r.strip_prefix("<!--") {
+                let end = body.find("-->").ok_or_else(malformed)?;
                 self.pos += 4 + end + 3;
             } else if let Some(after) = r.strip_prefix("<![CDATA[") {
                 let end = after.find("]]>").ok_or_else(malformed)?;

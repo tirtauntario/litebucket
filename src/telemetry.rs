@@ -71,7 +71,9 @@ pub struct Metrics {
 impl Default for Metrics {
     fn default() -> Self {
         Self {
-            ops: (0..OPERATIONS.len()).map(|_| OpMetrics::default()).collect(),
+            ops: (0..OPERATIONS.len())
+                .map(|_| OpMetrics::default())
+                .collect(),
             bytes_received: AtomicU64::new(0),
             bytes_sent: AtomicU64::new(0),
             integrity_errors: AtomicU64::new(0),
@@ -112,7 +114,10 @@ impl Metrics {
             for (c, class) in STATUS_CLASSES.iter().enumerate() {
                 let v = self.ops[i].status[c].load(Ordering::Relaxed);
                 if v > 0 {
-                    let _ = writeln!(out, "storlite_requests_total{{operation=\"{op}\",status=\"{class}\"}} {v}");
+                    let _ = writeln!(
+                        out,
+                        "storlite_requests_total{{operation=\"{op}\",status=\"{class}\"}} {v}"
+                    );
                 }
             }
         }
@@ -132,34 +137,88 @@ impl Metrics {
                     m.latency_buckets[b].load(Ordering::Relaxed)
                 );
             }
-            let _ = writeln!(out, "storlite_request_duration_seconds_bucket{{operation=\"{op}\",le=\"+Inf\"}} {count}");
+            let _ = writeln!(
+                out,
+                "storlite_request_duration_seconds_bucket{{operation=\"{op}\",le=\"+Inf\"}} {count}"
+            );
             let _ = writeln!(
                 out,
                 "storlite_request_duration_seconds_sum{{operation=\"{op}\"}} {}",
                 m.latency_sum_us.load(Ordering::Relaxed) as f64 / 1e6
             );
-            let _ = writeln!(out, "storlite_request_duration_seconds_count{{operation=\"{op}\"}} {count}");
+            let _ = writeln!(
+                out,
+                "storlite_request_duration_seconds_count{{operation=\"{op}\"}} {count}"
+            );
         }
         let counters: [(&str, &str, &AtomicU64); 11] = [
-            ("storlite_bytes_received_total", "Decoded object bytes received.", &self.bytes_received),
-            ("storlite_bytes_sent_total", "Object bytes sent.", &self.bytes_sent),
-            ("storlite_integrity_errors_total", "Storage integrity faults detected.", &self.integrity_errors),
-            ("storlite_recovery_actions_total", "Recovery actions taken.", &self.recovery_actions),
-            ("storlite_gc_deleted_blobs_total", "Garbage files reclaimed.", &self.gc_deleted_blobs),
-            ("storlite_gc_deleted_bytes_total", "Garbage bytes reclaimed.", &self.gc_deleted_bytes),
-            ("storlite_multipart_expired_total", "Inactive multipart uploads expired.", &self.multipart_expired),
-            ("storlite_multipart_aborted_total", "Multipart uploads aborted by clients.", &self.multipart_aborted),
+            (
+                "storlite_bytes_received_total",
+                "Decoded object bytes received.",
+                &self.bytes_received,
+            ),
+            (
+                "storlite_bytes_sent_total",
+                "Object bytes sent.",
+                &self.bytes_sent,
+            ),
+            (
+                "storlite_integrity_errors_total",
+                "Storage integrity faults detected.",
+                &self.integrity_errors,
+            ),
+            (
+                "storlite_recovery_actions_total",
+                "Recovery actions taken.",
+                &self.recovery_actions,
+            ),
+            (
+                "storlite_gc_deleted_blobs_total",
+                "Garbage files reclaimed.",
+                &self.gc_deleted_blobs,
+            ),
+            (
+                "storlite_gc_deleted_bytes_total",
+                "Garbage bytes reclaimed.",
+                &self.gc_deleted_bytes,
+            ),
+            (
+                "storlite_multipart_expired_total",
+                "Inactive multipart uploads expired.",
+                &self.multipart_expired,
+            ),
+            (
+                "storlite_multipart_aborted_total",
+                "Multipart uploads aborted by clients.",
+                &self.multipart_aborted,
+            ),
             (
                 "storlite_credential_reload_failures_total",
                 "Rejected credential reloads.",
                 &self.credential_reload_failures,
             ),
-            ("storlite_sqlite_checkpoints_total", "Passive WAL checkpoints run.", &self.checkpoints),
-            ("storlite_sqlite_wal_bytes", "WAL file size at last checkpoint.", &self.wal_bytes),
+            (
+                "storlite_sqlite_checkpoints_total",
+                "Passive WAL checkpoints run.",
+                &self.checkpoints,
+            ),
+            (
+                "storlite_sqlite_wal_bytes",
+                "WAL file size at last checkpoint.",
+                &self.wal_bytes,
+            ),
         ];
         for (name, help, v) in counters {
-            let kind = if name.ends_with("_total") { "counter" } else { "gauge" };
-            let _ = writeln!(out, "# HELP {name} {help}\n# TYPE {name} {kind}\n{name} {}", v.load(Ordering::Relaxed));
+            let kind = if name.ends_with("_total") {
+                "counter"
+            } else {
+                "gauge"
+            };
+            let _ = writeln!(
+                out,
+                "# HELP {name} {help}\n# TYPE {name} {kind}\n{name} {}",
+                v.load(Ordering::Relaxed)
+            );
         }
         for (name, help, v) in gauges {
             let _ = writeln!(out, "# HELP {name} {help}\n# TYPE {name} gauge\n{name} {v}");
@@ -177,7 +236,11 @@ pub fn init_logging(cfg: &LoggingConfig) {
         .with_writer(std::io::stderr)
         .with_target(false);
     let _ = if cfg.format == "json" {
-        builder.json().flatten_event(true).with_current_span(false).try_init()
+        builder
+            .json()
+            .flatten_event(true)
+            .with_current_span(false)
+            .try_init()
     } else {
         builder.try_init()
     };

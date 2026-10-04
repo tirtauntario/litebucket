@@ -9,15 +9,16 @@ use super::headers::{iso8601, response, xml};
 use super::listing::{self, TokenScope};
 use super::xml::XmlWriter;
 use super::{Cx, read_control_body};
+use crate::credentials::BucketScope;
 use crate::metadata::queries::{self, CreateBucket, DeleteBucket};
 use crate::metadata::{now_ms, with_write_tx};
 
 pub async fn list_buckets(cx: &Cx) -> S3Result<Response<Body>> {
-    let scope = cx
-        .auth
-        .credential
-        .bucket_listing_scope()
-        .map_err(|_| S3Error::access_denied())?;
+    let scope = match cx.auth.credential.bucket_listing_scope() {
+        BucketScope::All => None,
+        BucketScope::Only(set) => Some(set),
+        BucketScope::Denied => return Err(S3Error::access_denied()),
+    };
     let max: usize = match cx.req.q("max-buckets") {
         Some(v) => v
             .parse()
@@ -31,7 +32,10 @@ pub async fn list_buckets(cx: &Cx) -> S3Result<Response<Body>> {
         && region != cx.store.meta.region
     {
         // Every bucket lives in the configured region.
-        return Ok(xml(StatusCode::OK, list_buckets_xml(cx, &[], None, &prefix)));
+        return Ok(xml(
+            StatusCode::OK,
+            list_buckets_xml(cx, &[], None, &prefix),
+        ));
     }
     let token_scope = TokenScope::buckets(&prefix, cx.credential_id());
     let mut after = match cx.req.q("continuation-token") {
@@ -56,7 +60,11 @@ pub async fn list_buckets(cx: &Cx) -> S3Result<Response<Body>> {
                 continue;
             }
             if out.len() == max {
-                next = Some(out.last().map(|x: &queries::BucketRow| x.name.clone()).unwrap_or_default());
+                next = Some(
+                    out.last()
+                        .map(|x: &queries::BucketRow| x.name.clone())
+                        .unwrap_or_default(),
+                );
                 break;
             }
             out.push(b);
@@ -66,10 +74,18 @@ pub async fn list_buckets(cx: &Cx) -> S3Result<Response<Body>> {
         }
     }
     let token = next.map(|name| listing::encode_bucket_token(&cx.store, &name, &token_scope));
-    Ok(xml(StatusCode::OK, list_buckets_xml(cx, &out, token.as_deref(), &prefix)))
+    Ok(xml(
+        StatusCode::OK,
+        list_buckets_xml(cx, &out, token.as_deref(), &prefix),
+    ))
 }
 
-fn list_buckets_xml(cx: &Cx, buckets: &[queries::BucketRow], token: Option<&str>, prefix: &str) -> String {
+fn list_buckets_xml(
+    cx: &Cx,
+    buckets: &[queries::BucketRow],
+    token: Option<&str>,
+    prefix: &str,
+) -> String {
     let mut w = XmlWriter::new();
     w.root("ListAllMyBucketsResult")
         .open("Owner")
@@ -116,7 +132,9 @@ pub async fn create_bucket(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
                 )));
             }
         }
-        doc.child_text("LocationConstraint").map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        doc.child_text("LocationConstraint")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
     };
     let ok = match (&constraint, region.as_str()) {
         (None, "us-east-1") => true,
@@ -129,8 +147,12 @@ pub async fn create_bucket(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
             None => "The unspecified location constraint is incompatible for the region specific endpoint this request was sent to.".to_string(),
             Some(c) => format!("The {c} location constraint is incompatible for the region specific endpoint this request was sent to."),
         };
-        return Err(S3Error::new("IllegalLocationConstraintException", StatusCode::BAD_REQUEST, msg)
-            .with_extra("Region", region.clone()));
+        return Err(S3Error::new(
+            "IllegalLocationConstraintException",
+            StatusCode::BAD_REQUEST,
+            msg,
+        )
+        .with_extra("Region", region.clone()));
     }
     let max = cx.store.config.limits.max_buckets;
     let now = now_ms();
@@ -176,7 +198,11 @@ pub async fn get_bucket_location(cx: &Cx) -> S3Result<Response<Body>> {
     require_bucket_visibility(cx)?;
     cx.bucket().await?;
     let region = &cx.store.meta.region;
-    let value = if region == "us-east-1" { "" } else { region.as_str() };
+    let value = if region == "us-east-1" {
+        ""
+    } else {
+        region.as_str()
+    };
     let body = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><LocationConstraint xmlns=\"{}\">{}</LocationConstraint>",
         super::xml::S3_NS,
@@ -186,7 +212,11 @@ pub async fn get_bucket_location(cx: &Cx) -> S3Result<Response<Body>> {
 }
 
 pub async fn delete_bucket(cx: &Cx) -> S3Result<Response<Body>> {
-    if !cx.auth.credential.allows_manage_bucket(cx.req.bucket_name()) {
+    if !cx
+        .auth
+        .credential
+        .allows_manage_bucket(cx.req.bucket_name())
+    {
         return Err(S3Error::access_denied());
     }
     let bucket = cx.bucket().await?;
@@ -197,7 +227,11 @@ pub async fn delete_bucket(cx: &Cx) -> S3Result<Response<Body>> {
         .write(move |c| with_write_tx(c, |tx| queries::delete_bucket(tx, &id)))
         .await?;
     match res {
-        DeleteBucket::Deleted => Ok(response(StatusCode::NO_CONTENT, Vec::<(&str, String)>::new(), Body::empty())),
+        DeleteBucket::Deleted => Ok(response(
+            StatusCode::NO_CONTENT,
+            Vec::<(&str, String)>::new(),
+            Body::empty(),
+        )),
         DeleteBucket::NoSuchBucket => Err(S3Error::no_such_bucket()),
         DeleteBucket::NotEmpty => Err(S3Error::bucket_not_empty()),
     }

@@ -15,12 +15,27 @@ async fn setup() -> (TestServer, Client) {
 }
 
 async fn initiate(c: &Client, key: &str, headers: &[(&str, &str)]) -> String {
-    let r = c.send("POST", &format!("/docs/{key}"), "uploads", headers, Payload::Signed(vec![])).await;
+    let r = c
+        .send(
+            "POST",
+            &format!("/docs/{key}"),
+            "uploads",
+            headers,
+            Payload::Signed(vec![]),
+        )
+        .await;
     assert_eq!(r.status, 200, "{}", r.text());
     r.one("UploadId")
 }
 
-async fn part(c: &Client, key: &str, id: &str, n: u32, data: &[u8], headers: &[(&str, &str)]) -> Resp {
+async fn part(
+    c: &Client,
+    key: &str,
+    id: &str,
+    n: u32,
+    data: &[u8],
+    headers: &[(&str, &str)],
+) -> Resp {
     c.send(
         "PUT",
         &format!("/docs/{key}"),
@@ -34,19 +49,35 @@ async fn part(c: &Client, key: &str, id: &str, n: u32, data: &[u8], headers: &[(
 fn manifest(parts: &[(u32, String)]) -> Vec<u8> {
     let mut x = String::from("<CompleteMultipartUpload>");
     for (n, e) in parts {
-        x.push_str(&format!("<Part><PartNumber>{n}</PartNumber><ETag>{e}</ETag></Part>"));
+        x.push_str(&format!(
+            "<Part><PartNumber>{n}</PartNumber><ETag>{e}</ETag></Part>"
+        ));
     }
     x.push_str("</CompleteMultipartUpload>");
     x.into_bytes()
 }
 
-async fn complete(c: &Client, key: &str, id: &str, body: Vec<u8>, headers: &[(&str, &str)]) -> Resp {
-    c.send("POST", &format!("/docs/{key}"), &format!("uploadId={id}"), headers, Payload::Signed(body))
-        .await
+async fn complete(
+    c: &Client,
+    key: &str,
+    id: &str,
+    body: Vec<u8>,
+    headers: &[(&str, &str)],
+) -> Resp {
+    c.send(
+        "POST",
+        &format!("/docs/{key}"),
+        &format!("uploadId={id}"),
+        headers,
+        Payload::Signed(body),
+    )
+    .await
 }
 
 fn data(n: usize, seed: u8) -> Vec<u8> {
-    (0..n).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect()
+    (0..n)
+        .map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed))
+        .collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -60,7 +91,9 @@ async fn mpu_01_parallel_parts_and_replacement() {
     let mut tasks = Vec::new();
     for (n, d) in [(1u32, p1.clone()), (2, p2.clone()), (3, data(10, 9))] {
         let (c, id) = (c.clone(), id.clone());
-        tasks.push(tokio::spawn(async move { (n, part(&c, "big", &id, n, &d, &[]).await) }));
+        tasks.push(tokio::spawn(async move {
+            (n, part(&c, "big", &id, n, &d, &[]).await)
+        }));
     }
     let mut etags = std::collections::BTreeMap::new();
     for t in tasks {
@@ -73,7 +106,10 @@ async fn mpu_01_parallel_parts_and_replacement() {
     etags.insert(3, r.header("etag").unwrap());
     let l = c.get("/docs/big", &format!("uploadId={id}")).await;
     assert_eq!(l.all("PartNumber"), vec!["1", "2", "3"]);
-    assert_eq!(l.all("Size"), vec![(5 * MIB).to_string(), (5 * MIB).to_string(), "1000".into()]);
+    assert_eq!(
+        l.all("Size"),
+        vec![(5 * MIB).to_string(), (5 * MIB).to_string(), "1000".into()]
+    );
     let parts: Vec<(u32, String)> = etags.into_iter().collect();
     let r = complete(&c, "big", &id, manifest(&parts), &[]).await;
     assert_eq!(r.status, 200, "{}", r.text());
@@ -84,7 +120,10 @@ async fn mpu_01_parallel_parts_and_replacement() {
     assert_eq!(g.body.len(), whole.len());
     assert!(g.body == whole);
     use md5::Digest;
-    let md5s: Vec<[u8; 16]> = [&p1, &p2, &p3].iter().map(|p| md5::Md5::digest(p).into()).collect();
+    let md5s: Vec<[u8; 16]> = [&p1, &p2, &p3]
+        .iter()
+        .map(|p| md5::Md5::digest(p).into())
+        .collect();
     let expected = checksums::multipart_etag(&md5s);
     assert_eq!(g.header("etag").unwrap(), format!("\"{expected}\""));
     assert_eq!(g.header("x-amz-mp-parts-count").unwrap(), "3");
@@ -92,7 +131,11 @@ async fn mpu_01_parallel_parts_and_replacement() {
     assert!(files_under(&s.data_dir().join("staging")).is_empty());
     let store = s.store();
     storlite::maintenance::refresh_gauges(&store).await.unwrap();
-    assert_eq!(store.maintenance_gauges().0, 4, "3 completed parts + replaced part 3");
+    assert_eq!(
+        store.maintenance_gauges().0,
+        4,
+        "3 completed parts + replaced part 3"
+    );
     assert_eq!(store.maintenance_gauges().2, 0);
 }
 
@@ -112,7 +155,10 @@ async fn mpu_02_parts_survive_restart_and_listings_paginate() {
     let mut marker = 0;
     loop {
         let r = c
-            .get("/docs/a/one", &format!("uploadId={id}&max-parts=2&part-number-marker={marker}"))
+            .get(
+                "/docs/a/one",
+                &format!("uploadId={id}&max-parts=2&part-number-marker={marker}"),
+            )
             .await;
         assert_eq!(r.status, 200, "{}", r.text());
         seen.extend(r.all("PartNumber"));
@@ -144,7 +190,10 @@ async fn mpu_02_parts_survive_restart_and_listings_paginate() {
     got.sort();
     assert_eq!(got, want);
     let r = c.get("/docs", "uploads&delimiter=%2F").await;
-    assert_eq!(r.all("Prefix").iter().filter(|p| p.ends_with('/')).count(), 2);
+    assert_eq!(
+        r.all("Prefix").iter().filter(|p| p.ends_with('/')).count(),
+        2
+    );
     let r = c.get("/docs", "uploads&prefix=b%2F").await;
     assert_eq!(r.all("UploadId"), vec![id3]);
     // Resumed upload completes after restart.
@@ -165,15 +214,33 @@ async fn mpu_02_parts_survive_restart_and_listings_paginate() {
 async fn mpu_03_invalid_manifests_cannot_complete() {
     let (_s, c) = setup().await;
     let id = initiate(&c, "m", &[]).await;
-    let e1 = part(&c, "m", &id, 1, &data(1000, 1), &[]).await.header("etag").unwrap();
-    let e2 = part(&c, "m", &id, 2, &data(1000, 2), &[]).await.header("etag").unwrap();
+    let e1 = part(&c, "m", &id, 1, &data(1000, 1), &[])
+        .await
+        .header("etag")
+        .unwrap();
+    let e2 = part(&c, "m", &id, 2, &data(1000, 2), &[])
+        .await
+        .header("etag")
+        .unwrap();
     let cases = [
-        (manifest(&[(2, e2.clone()), (1, e1.clone())]), "InvalidPartOrder"),
-        (manifest(&[(1, e1.clone()), (1, e1.clone())]), "InvalidPartOrder"),
+        (
+            manifest(&[(2, e2.clone()), (1, e1.clone())]),
+            "InvalidPartOrder",
+        ),
+        (
+            manifest(&[(1, e1.clone()), (1, e1.clone())]),
+            "InvalidPartOrder",
+        ),
         (manifest(&[(1, e1.clone()), (3, e2.clone())]), "InvalidPart"),
         (manifest(&[(1, "\"0000\"".into())]), "InvalidPart"),
-        (manifest(&[(1, e1.clone()), (2, e2.clone())]), "EntityTooSmall"),
-        (b"<CompleteMultipartUpload></CompleteMultipartUpload>".to_vec(), "MalformedXML"),
+        (
+            manifest(&[(1, e1.clone()), (2, e2.clone())]),
+            "EntityTooSmall",
+        ),
+        (
+            b"<CompleteMultipartUpload></CompleteMultipartUpload>".to_vec(),
+            "MalformedXML",
+        ),
         (b"<CompleteMultipartUpload><Part>".to_vec(), "MalformedXML"),
     ];
     for (body, code) in cases {
@@ -187,15 +254,42 @@ async fn mpu_03_invalid_manifests_cannot_complete() {
     assert_eq!(c.get("/docs/m", "").await.body, data(1000, 2));
     // Invalid part numbers.
     let id = initiate(&c, "m2", &[]).await;
-    assert_eq!(part(&c, "m2", &id, 0, b"x", &[]).await.code(), "InvalidArgument");
-    assert_eq!(part(&c, "m2", &id, 10_001, b"x", &[]).await.code(), "InvalidArgument");
+    assert_eq!(
+        part(&c, "m2", &id, 0, b"x", &[]).await.code(),
+        "InvalidArgument"
+    );
+    assert_eq!(
+        part(&c, "m2", &id, 10_001, b"x", &[]).await.code(),
+        "InvalidArgument"
+    );
     // Unknown and malformed upload IDs.
-    assert_eq!(part(&c, "m2", "0123456789abcdef0123456789abcdef", 1, b"x", &[]).await.code(), "NoSuchUpload");
-    assert_eq!(part(&c, "m2", &encode_q("../../x"), 1, b"x", &[]).await.code(), "NoSuchUpload");
+    assert_eq!(
+        part(&c, "m2", "0123456789abcdef0123456789abcdef", 1, b"x", &[])
+            .await
+            .code(),
+        "NoSuchUpload"
+    );
+    assert_eq!(
+        part(&c, "m2", &encode_q("../../x"), 1, b"x", &[])
+            .await
+            .code(),
+        "NoSuchUpload"
+    );
     // An upload ID is bound to its key.
-    assert_eq!(part(&c, "other", &id, 1, b"x", &[]).await.code(), "NoSuchUpload");
+    assert_eq!(
+        part(&c, "other", &id, 1, b"x", &[]).await.code(),
+        "NoSuchUpload"
+    );
     // Bad part checksum.
-    let r = part(&c, "m2", &id, 1, b"abc", &[("x-amz-checksum-crc32", &b64(&Algorithm::Crc32.hash(b"abd")))]).await;
+    let r = part(
+        &c,
+        "m2",
+        &id,
+        1,
+        b"abc",
+        &[("x-amz-checksum-crc32", &b64(&Algorithm::Crc32.hash(b"abd")))],
+    )
+    .await;
     assert_eq!(r.code(), "BadDigest");
 }
 
@@ -203,34 +297,80 @@ async fn mpu_03_invalid_manifests_cannot_complete() {
 async fn mpu_04_terminal_uploads_cannot_be_revived() {
     let (_s, c) = setup().await;
     let id = initiate(&c, "t", &[]).await;
-    let e = part(&c, "t", &id, 1, b"one", &[]).await.header("etag").unwrap();
-    assert_eq!(c.send("DELETE", "/docs/t", &format!("uploadId={id}"), &[], Payload::Signed(vec![])).await.status, 204);
-    assert_eq!(part(&c, "t", &id, 2, b"two", &[]).await.code(), "NoSuchUpload");
-    assert_eq!(complete(&c, "t", &id, manifest(&[(1, e)]), &[]).await.code(), "NoSuchUpload");
+    let e = part(&c, "t", &id, 1, b"one", &[])
+        .await
+        .header("etag")
+        .unwrap();
     assert_eq!(
-        c.send("DELETE", "/docs/t", &format!("uploadId={id}"), &[], Payload::Signed(vec![])).await.code(),
+        c.send(
+            "DELETE",
+            "/docs/t",
+            &format!("uploadId={id}"),
+            &[],
+            Payload::Signed(vec![])
+        )
+        .await
+        .status,
+        204
+    );
+    assert_eq!(
+        part(&c, "t", &id, 2, b"two", &[]).await.code(),
         "NoSuchUpload"
     );
-    assert_eq!(c.get("/docs/t", &format!("uploadId={id}")).await.code(), "NoSuchUpload");
+    assert_eq!(
+        complete(&c, "t", &id, manifest(&[(1, e)]), &[])
+            .await
+            .code(),
+        "NoSuchUpload"
+    );
+    assert_eq!(
+        c.send(
+            "DELETE",
+            "/docs/t",
+            &format!("uploadId={id}"),
+            &[],
+            Payload::Signed(vec![])
+        )
+        .await
+        .code(),
+        "NoSuchUpload"
+    );
+    assert_eq!(
+        c.get("/docs/t", &format!("uploadId={id}")).await.code(),
+        "NoSuchUpload"
+    );
     // Race many part uploads against completion and abort.
     for round in 0..3 {
         let key = format!("race{round}");
         let id = initiate(&c, &key, &[]).await;
-        let e = part(&c, &key, &id, 1, &data(100, 1), &[]).await.header("etag").unwrap();
+        let e = part(&c, &key, &id, 1, &data(100, 1), &[])
+            .await
+            .header("etag")
+            .unwrap();
         let mut tasks = Vec::new();
         for n in 2..10u32 {
             let (c, id, key) = (c.clone(), id.clone(), key.clone());
-            tasks.push(tokio::spawn(async move { part(&c, &key, &id, n, b"late", &[]).await.status }));
+            tasks.push(tokio::spawn(async move {
+                part(&c, &key, &id, n, b"late", &[]).await.status
+            }));
         }
         let finisher = {
             let (c, id, key) = (c.clone(), id.clone(), key.clone());
             tokio::spawn(async move {
                 if round == 1 {
-                    c.send("DELETE", &format!("/docs/{key}"), &format!("uploadId={id}"), &[], Payload::Signed(vec![]))
+                    c.send(
+                        "DELETE",
+                        &format!("/docs/{key}"),
+                        &format!("uploadId={id}"),
+                        &[],
+                        Payload::Signed(vec![]),
+                    )
+                    .await
+                    .status
+                } else {
+                    complete(&c, &key, &id, manifest(&[(1, e)]), &[])
                         .await
                         .status
-                } else {
-                    complete(&c, &key, &id, manifest(&[(1, e)]), &[]).await.status
                 }
             })
         };
@@ -244,9 +384,16 @@ async fn mpu_04_terminal_uploads_cannot_be_revived() {
             assert_eq!(c.head(&format!("/docs/{key}")).await.status, 404);
         } else {
             assert_eq!(fin, 200);
-            assert_eq!(c.get(&format!("/docs/{key}"), "").await.body, data(100, 1), "only selected parts");
+            assert_eq!(
+                c.get(&format!("/docs/{key}"), "").await.body,
+                data(100, 1),
+                "only selected parts"
+            );
         }
-        assert_eq!(part(&c, &key, &id, 11, b"x", &[]).await.code(), "NoSuchUpload");
+        assert_eq!(
+            part(&c, &key, &id, 11, b"x", &[]).await.code(),
+            "NoSuchUpload"
+        );
     }
 }
 
@@ -259,11 +406,33 @@ async fn mpu_05_checksum_modes() {
     whole.extend_from_slice(&p2);
     // Default: CRC64NVME FULL_OBJECT computed over the assembled object.
     let id = initiate(&c, "d", &[]).await;
-    let e1 = part(&c, "d", &id, 1, &p1, &[]).await.header("etag").unwrap();
-    let e2 = part(&c, "d", &id, 2, &p2, &[]).await.header("etag").unwrap();
-    assert_eq!(complete(&c, "d", &id, manifest(&[(1, e1), (2, e2)]), &[]).await.status, 200);
-    let h = c.send("HEAD", "/docs/d", "", &[("x-amz-checksum-mode", "ENABLED")], Payload::Signed(vec![])).await;
-    assert_eq!(h.header("x-amz-checksum-crc64nvme").unwrap(), b64(&Algorithm::Crc64Nvme.hash(&whole)));
+    let e1 = part(&c, "d", &id, 1, &p1, &[])
+        .await
+        .header("etag")
+        .unwrap();
+    let e2 = part(&c, "d", &id, 2, &p2, &[])
+        .await
+        .header("etag")
+        .unwrap();
+    assert_eq!(
+        complete(&c, "d", &id, manifest(&[(1, e1), (2, e2)]), &[])
+            .await
+            .status,
+        200
+    );
+    let h = c
+        .send(
+            "HEAD",
+            "/docs/d",
+            "",
+            &[("x-amz-checksum-mode", "ENABLED")],
+            Payload::Signed(vec![]),
+        )
+        .await;
+    assert_eq!(
+        h.header("x-amz-checksum-crc64nvme").unwrap(),
+        b64(&Algorithm::Crc64Nvme.hash(&whole))
+    );
     assert_eq!(h.header("x-amz-checksum-type").unwrap(), "FULL_OBJECT");
 
     // Explicit composite CRC32C.
@@ -275,12 +444,27 @@ async fn mpu_05_checksum_modes() {
     let r2 = part(&c, "comp", &id, 2, &p2, &[("x-amz-checksum-crc32c", &c2)]).await;
     // Wrong algorithm on a part of an explicit upload.
     assert_eq!(
-        part(&c, "comp", &id, 3, b"x", &[("x-amz-checksum-crc32", &b64(&Algorithm::Crc32.hash(b"x")))]).await.code(),
+        part(
+            &c,
+            "comp",
+            &id,
+            3,
+            b"x",
+            &[("x-amz-checksum-crc32", &b64(&Algorithm::Crc32.hash(b"x")))]
+        )
+        .await
+        .code(),
         "InvalidRequest"
     );
     // Composite completion requires per-part checksums.
-    let no_sums = manifest(&[(1, r1.header("etag").unwrap()), (2, r2.header("etag").unwrap())]);
-    assert_eq!(complete(&c, "comp", &id, no_sums, &[]).await.code(), "InvalidRequest");
+    let no_sums = manifest(&[
+        (1, r1.header("etag").unwrap()),
+        (2, r2.header("etag").unwrap()),
+    ]);
+    assert_eq!(
+        complete(&c, "comp", &id, no_sums, &[]).await.code(),
+        "InvalidRequest"
+    );
     let body = format!(
         "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{}</ETag><ChecksumCRC32C>{c1}</ChecksumCRC32C></Part><Part><PartNumber>2</PartNumber><ETag>{}</ETag><ChecksumCRC32C>{c2}</ChecksumCRC32C></Part></CompleteMultipartUpload>",
         r1.header("etag").unwrap(),
@@ -293,26 +477,80 @@ async fn mpu_05_checksum_modes() {
     let expected = format!("{}-2", b64(&Algorithm::Crc32c.hash(&cat)));
     assert_eq!(r.one("ChecksumCRC32C"), expected);
     assert_eq!(r.one("ChecksumType"), "COMPOSITE");
-    let h = c.send("HEAD", "/docs/comp", "", &[("x-amz-checksum-mode", "ENABLED")], Payload::Signed(vec![])).await;
+    let h = c
+        .send(
+            "HEAD",
+            "/docs/comp",
+            "",
+            &[("x-amz-checksum-mode", "ENABLED")],
+            Payload::Signed(vec![]),
+        )
+        .await;
     assert_eq!(h.header("x-amz-checksum-crc32c").unwrap(), expected);
 
     // Explicit FULL_OBJECT CRC32 with a full-object checksum on completion.
-    let id = initiate(&c, "full", &[("x-amz-checksum-algorithm", "CRC32"), ("x-amz-checksum-type", "FULL_OBJECT")]).await;
-    let e1 = part(&c, "full", &id, 1, &p1, &[]).await.header("etag").unwrap();
-    let e2 = part(&c, "full", &id, 2, &p2, &[]).await.header("etag").unwrap();
-    let wrong = complete(&c, "full", &id, manifest(&[(1, e1.clone()), (2, e2.clone())]), &[("x-amz-checksum-crc32", "AAAAAA==")]).await;
+    let id = initiate(
+        &c,
+        "full",
+        &[
+            ("x-amz-checksum-algorithm", "CRC32"),
+            ("x-amz-checksum-type", "FULL_OBJECT"),
+        ],
+    )
+    .await;
+    let e1 = part(&c, "full", &id, 1, &p1, &[])
+        .await
+        .header("etag")
+        .unwrap();
+    let e2 = part(&c, "full", &id, 2, &p2, &[])
+        .await
+        .header("etag")
+        .unwrap();
+    let wrong = complete(
+        &c,
+        "full",
+        &id,
+        manifest(&[(1, e1.clone()), (2, e2.clone())]),
+        &[("x-amz-checksum-crc32", "AAAAAA==")],
+    )
+    .await;
     assert_eq!(wrong.code(), "BadDigest");
     let good = b64(&Algorithm::Crc32.hash(&whole));
-    let r = complete(&c, "full", &id, manifest(&[(1, e1), (2, e2)]), &[("x-amz-checksum-crc32", &good)]).await;
+    let r = complete(
+        &c,
+        "full",
+        &id,
+        manifest(&[(1, e1), (2, e2)]),
+        &[("x-amz-checksum-crc32", &good)],
+    )
+    .await;
     assert_eq!(r.status, 200, "{}", r.text());
     assert_eq!(r.one("ChecksumCRC32"), good);
     // Unsupported combinations.
     let r = c
-        .send("POST", "/docs/x", "uploads", &[("x-amz-checksum-algorithm", "SHA256"), ("x-amz-checksum-type", "FULL_OBJECT")], Payload::Signed(vec![]))
+        .send(
+            "POST",
+            "/docs/x",
+            "uploads",
+            &[
+                ("x-amz-checksum-algorithm", "SHA256"),
+                ("x-amz-checksum-type", "FULL_OBJECT"),
+            ],
+            Payload::Signed(vec![]),
+        )
         .await;
     assert_eq!(r.code(), "InvalidRequest");
     let r = c
-        .send("POST", "/docs/x", "uploads", &[("x-amz-checksum-algorithm", "CRC64NVME"), ("x-amz-checksum-type", "COMPOSITE")], Payload::Signed(vec![]))
+        .send(
+            "POST",
+            "/docs/x",
+            "uploads",
+            &[
+                ("x-amz-checksum-algorithm", "CRC64NVME"),
+                ("x-amz-checksum-type", "COMPOSITE"),
+            ],
+            Payload::Signed(vec![]),
+        )
         .await;
     assert_eq!(r.code(), "InvalidRequest");
 }
@@ -322,27 +560,57 @@ async fn mpu_06_completion_conditions_and_quota_at_commit() {
     let (s, c) = setup().await;
     c.put("/docs/exists", b"old").await;
     let id = initiate(&c, "exists", &[]).await;
-    let e = part(&c, "exists", &id, 1, b"new", &[]).await.header("etag").unwrap();
-    let r = complete(&c, "exists", &id, manifest(&[(1, e.clone())]), &[("if-none-match", "*")]).await;
+    let e = part(&c, "exists", &id, 1, b"new", &[])
+        .await
+        .header("etag")
+        .unwrap();
+    let r = complete(
+        &c,
+        "exists",
+        &id,
+        manifest(&[(1, e.clone())]),
+        &[("if-none-match", "*")],
+    )
+    .await;
     assert_eq!(r.code(), "PreconditionFailed");
     assert_eq!(c.get("/docs/exists", "").await.body, b"old");
     // The upload went back to OPEN and can still complete.
     let etag = c.head("/docs/exists").await.header("etag").unwrap();
-    let r = complete(&c, "exists", &id, manifest(&[(1, e)]), &[("if-match", &etag)]).await;
+    let r = complete(
+        &c,
+        "exists",
+        &id,
+        manifest(&[(1, e)]),
+        &[("if-match", &etag)],
+    )
+    .await;
     assert_eq!(r.status, 200, "{}", r.text());
     assert_eq!(c.get("/docs/exists", "").await.body, b"new");
     // Quota at commit.
     s.store()
         .db
         .write(|conn| {
-            storlite::metadata::with_write_tx(conn, |tx| storlite::metadata::queries::set_bucket_quota(tx, "docs", Some(10)))
+            storlite::metadata::with_write_tx(conn, |tx| {
+                storlite::metadata::queries::set_bucket_quota(tx, "docs", Some(10))
+            })
         })
         .await
         .unwrap();
     let id = initiate(&c, "q", &[]).await;
-    let e = part(&c, "q", &id, 1, &data(100, 1), &[]).await.header("etag").unwrap();
-    assert_eq!(complete(&c, "q", &id, manifest(&[(1, e)]), &[]).await.code(), "QuotaExceeded");
-    assert_eq!(c.put("/docs/q2", &data(100, 1)).await.code(), "QuotaExceeded");
+    let e = part(&c, "q", &id, 1, &data(100, 1), &[])
+        .await
+        .header("etag")
+        .unwrap();
+    assert_eq!(
+        complete(&c, "q", &id, manifest(&[(1, e)]), &[])
+            .await
+            .code(),
+        "QuotaExceeded"
+    );
+    assert_eq!(
+        c.put("/docs/q2", &data(100, 1)).await.code(),
+        "QuotaExceeded"
+    );
     // Reads and deletes still work over quota.
     assert_eq!(c.get("/docs/exists", "").await.status, 200);
     assert_eq!(c.delete("/docs/exists").await.status, 204);
@@ -352,7 +620,10 @@ async fn mpu_06_completion_conditions_and_quota_at_commit() {
 async fn mpu_07_completion_retry_uses_receipt_without_resurrection() {
     let (_s, c) = setup().await;
     let id = initiate(&c, "r", &[]).await;
-    let e = part(&c, "r", &id, 1, b"payload", &[]).await.header("etag").unwrap();
+    let e = part(&c, "r", &id, 1, b"payload", &[])
+        .await
+        .header("etag")
+        .unwrap();
     let body = manifest(&[(1, e.clone())]);
     let first = complete(&c, "r", &id, body.clone(), &[]).await;
     assert_eq!(first.status, 200);
@@ -361,7 +632,10 @@ async fn mpu_07_completion_retry_uses_receipt_without_resurrection() {
     assert_eq!(retry.one("ETag"), first.one("ETag"));
     // A changed manifest does not reuse the receipt.
     let other = manifest(&[(1, "\"ffffffffffffffffffffffffffffffff\"".into())]);
-    assert_eq!(complete(&c, "r", &id, other, &[]).await.code(), "NoSuchUpload");
+    assert_eq!(
+        complete(&c, "r", &id, other, &[]).await.code(),
+        "NoSuchUpload"
+    );
     // Delete the object, then retry: receipt replays, object stays deleted.
     c.delete("/docs/r").await;
     assert_eq!(complete(&c, "r", &id, body.clone(), &[]).await.status, 200);
@@ -388,7 +662,10 @@ async fn mpu_08_expiry_and_abort_release_parts() {
     store
         .db
         .write(move |conn| {
-            conn.execute("UPDATE multipart_uploads SET last_activity_ms = 0 WHERE upload_id = ?1", [idc])?;
+            conn.execute(
+                "UPDATE multipart_uploads SET last_activity_ms = 0 WHERE upload_id = ?1",
+                [idc],
+            )?;
             Ok(())
         })
         .await
@@ -399,12 +676,22 @@ async fn mpu_08_expiry_and_abort_release_parts() {
         assert_eq!(storlite::maintenance::expire_once(&store).await.unwrap(), 0);
     }
     assert_eq!(storlite::maintenance::expire_once(&store).await.unwrap(), 1);
-    assert_eq!(part(&c, "old", &id, 2, b"x", &[]).await.code(), "NoSuchUpload");
+    assert_eq!(
+        part(&c, "old", &id, 2, b"x", &[]).await.code(),
+        "NoSuchUpload"
+    );
     assert_eq!(store.capacity.part_bytes(), 1000);
     // Parts of expired/aborted uploads are reclaimed by GC; active ones stay.
     while storlite::maintenance::gc_once(&store).await.unwrap() > 0 {}
     assert_eq!(files_under(&s.data_dir().join("multipart")).len(), 1);
-    c.send("DELETE", "/docs/active", &format!("uploadId={active}"), &[], Payload::Signed(vec![])).await;
+    c.send(
+        "DELETE",
+        "/docs/active",
+        &format!("uploadId={active}"),
+        &[],
+        Payload::Signed(vec![]),
+    )
+    .await;
     while storlite::maintenance::gc_once(&store).await.unwrap() > 0 {}
     assert!(files_under(&s.data_dir().join("multipart")).is_empty());
     assert_eq!(store.capacity.part_bytes(), 0);
@@ -412,7 +699,9 @@ async fn mpu_08_expiry_and_abort_release_parts() {
     storlite::maintenance::expire_once(&store).await.unwrap();
     let n: i64 = store
         .db
-        .read(|conn| Ok(conn.query_row("SELECT count(*) FROM multipart_uploads", [], |r| r.get(0))?))
+        .read(
+            |conn| Ok(conn.query_row("SELECT count(*) FROM multipart_uploads", [], |r| r.get(0))?),
+        )
         .await
         .unwrap();
     assert_eq!(n, 0);
@@ -428,12 +717,31 @@ async fn cap_03_assembly_accounts_for_output_space() {
     c.create_bucket("docs").await;
     c.put("/docs/a", b"old").await;
     let id = initiate(&c, "a", &[]).await;
-    let e1 = part(&c, "a", &id, 1, &data(5 * MIB, 1), &[]).await.header("etag").unwrap();
-    let e2 = part(&c, "a", &id, 2, &data(2 * MIB, 2), &[]).await.header("etag").unwrap();
+    let e1 = part(&c, "a", &id, 1, &data(5 * MIB, 1), &[])
+        .await
+        .header("etag")
+        .unwrap();
+    let e2 = part(&c, "a", &id, 2, &data(2 * MIB, 2), &[])
+        .await
+        .header("etag")
+        .unwrap();
     // 7 MiB of parts + 7 MiB output exceeds the 12 MiB temporary cap.
-    let r = complete(&c, "a", &id, manifest(&[(1, e1.clone()), (2, e2.clone())]), &[]).await;
+    let r = complete(
+        &c,
+        "a",
+        &id,
+        manifest(&[(1, e1.clone()), (2, e2.clone())]),
+        &[],
+    )
+    .await;
     assert_eq!(r.status, 503, "{}", r.text());
     assert_eq!(c.get("/docs/a", "").await.body, b"old");
     // Still OPEN after the refusal; listing works.
-    assert_eq!(c.get("/docs/a", &format!("uploadId={id}")).await.all("PartNumber").len(), 2);
+    assert_eq!(
+        c.get("/docs/a", &format!("uploadId={id}"))
+            .await
+            .all("PartNumber")
+            .len(),
+        2
+    );
 }

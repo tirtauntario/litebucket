@@ -48,7 +48,9 @@ fn wildcard_match(pattern: &str, value: &str, ignore_case: bool) -> bool {
     };
     match p.split_once('*') {
         None => p == v,
-        Some((pre, suf)) => v.len() >= pre.len() + suf.len() && v.starts_with(pre) && v.ends_with(suf),
+        Some((pre, suf)) => {
+            v.len() >= pre.len() + suf.len() && v.starts_with(pre) && v.ends_with(suf)
+        }
     }
 }
 
@@ -74,31 +76,44 @@ pub fn parse_config(body: &[u8]) -> S3Result<Vec<CorsRule>> {
                 }
                 "AllowedOrigin" => {
                     if !wildcard_ok(&t) {
-                        return Err(S3Error::invalid_request(format!("AllowedOrigin \"{t}\" can not have more than one wildcard.")));
+                        return Err(S3Error::invalid_request(format!(
+                            "AllowedOrigin \"{t}\" can not have more than one wildcard."
+                        )));
                     }
                     rule.allowed_origins.push(t);
                 }
                 "AllowedMethod" => {
                     if !METHODS.contains(&t.as_str()) {
-                        return Err(S3Error::invalid_request(format!("Found unsupported HTTP method in CORS config. Unsupported method is {t}")));
+                        return Err(S3Error::invalid_request(format!(
+                            "Found unsupported HTTP method in CORS config. Unsupported method is {t}"
+                        )));
                     }
                     rule.allowed_methods.push(t);
                 }
                 "AllowedHeader" => {
                     if !wildcard_ok(&t) {
-                        return Err(S3Error::invalid_request(format!("AllowedHeader \"{t}\" can not have more than one wildcard.")));
+                        return Err(S3Error::invalid_request(format!(
+                            "AllowedHeader \"{t}\" can not have more than one wildcard."
+                        )));
                     }
                     rule.allowed_headers.push(t);
                 }
                 "ExposeHeader" => {
-                    if t.contains('*') || t.is_empty() || http::HeaderName::from_bytes(t.as_bytes()).is_err() {
-                        return Err(S3Error::invalid_request(format!("ExposeHeader \"{t}\" contains wildcard or is invalid.")));
+                    if t.contains('*')
+                        || t.is_empty()
+                        || http::HeaderName::from_bytes(t.as_bytes()).is_err()
+                    {
+                        return Err(S3Error::invalid_request(format!(
+                            "ExposeHeader \"{t}\" contains wildcard or is invalid."
+                        )));
                     }
                     rule.expose_headers.push(t);
                 }
                 "MaxAgeSeconds" => {
-                    rule.max_age_seconds =
-                        Some(t.parse().map_err(|_| S3Error::invalid_argument("invalid MaxAgeSeconds"))?);
+                    rule.max_age_seconds = Some(
+                        t.parse()
+                            .map_err(|_| S3Error::invalid_argument("invalid MaxAgeSeconds"))?,
+                    );
                 }
                 _ => return Err(S3Error::malformed_xml()),
             }
@@ -115,7 +130,11 @@ pub fn parse_config(body: &[u8]) -> S3Result<Vec<CorsRule>> {
 }
 
 fn require_manage(cx: &Cx) -> S3Result<()> {
-    if cx.auth.credential.allows_manage_bucket(cx.req.bucket_name()) {
+    if cx
+        .auth
+        .credential
+        .allows_manage_bucket(cx.req.bucket_name())
+    {
         Ok(())
     } else {
         Err(S3Error::access_denied())
@@ -125,9 +144,11 @@ fn require_manage(cx: &Cx) -> S3Result<()> {
 pub async fn put_bucket_cors(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     require_manage(cx)?;
     let bucket = cx.bucket().await?;
-    let body = read_control_body(cx, body, cx.store.config.limits.max_cors_body_bytes, true).await?;
+    let body =
+        read_control_body(cx, body, cx.store.config.limits.max_cors_body_bytes, true).await?;
     let rules = parse_config(&body)?;
-    let json = serde_json::to_string(&rules).map_err(|e| S3Error::internal().with_detail(e.to_string()))?;
+    let json = serde_json::to_string(&rules)
+        .map_err(|e| S3Error::internal().with_detail(e.to_string()))?;
     let id = bucket.id;
     let ok = cx
         .store
@@ -137,7 +158,11 @@ pub async fn put_bucket_cors(cx: &Cx, body: Body) -> S3Result<Response<Body>> {
     if !ok {
         return Err(S3Error::no_such_bucket());
     }
-    Ok(response(StatusCode::OK, Vec::<(&str, String)>::new(), Body::empty()))
+    Ok(response(
+        StatusCode::OK,
+        Vec::<(&str, String)>::new(),
+        Body::empty(),
+    ))
 }
 
 pub async fn get_bucket_cors(cx: &Cx) -> S3Result<Response<Body>> {
@@ -178,7 +203,11 @@ pub async fn delete_bucket_cors(cx: &Cx) -> S3Result<Response<Body>> {
         .db
         .write(move |c| with_write_tx(c, |tx| queries::set_bucket_cors(tx, &id, None)))
         .await?;
-    Ok(response(StatusCode::NO_CONTENT, Vec::<(&str, String)>::new(), Body::empty()))
+    Ok(response(
+        StatusCode::NO_CONTENT,
+        Vec::<(&str, String)>::new(),
+        Body::empty(),
+    ))
 }
 
 fn load(json: Option<&str>) -> Option<Vec<CorsRule>> {
@@ -193,9 +222,16 @@ fn forbidden() -> S3Error {
     )
 }
 
-fn find_rule<'a>(rules: &'a [CorsRule], origin: &str, method: &str, req_headers: &[String]) -> Option<&'a CorsRule> {
+fn find_rule<'a>(
+    rules: &'a [CorsRule],
+    origin: &str,
+    method: &str,
+    req_headers: &[String],
+) -> Option<&'a CorsRule> {
     rules.iter().find(|r| {
-        r.allowed_origins.iter().any(|o| wildcard_match(o, origin, false))
+        r.allowed_origins
+            .iter()
+            .any(|o| wildcard_match(o, origin, false))
             && r.allowed_methods.iter().any(|m| m == method)
             && req_headers
                 .iter()
@@ -207,7 +243,9 @@ fn find_rule<'a>(rules: &'a [CorsRule], origin: &str, method: &str, req_headers:
 /// the same 403 so existence is not disclosed.
 pub async fn preflight(store: &Arc<Store>, req: &S3Request) -> S3Result<Response<Body>> {
     let origin = req.header("origin")?.map(str::to_string);
-    let method = req.header("access-control-request-method")?.map(str::to_string);
+    let method = req
+        .header("access-control-request-method")?
+        .map(str::to_string);
     let (Some(origin), Some(method)) = (origin, method) else {
         return Err(S3Error::new(
             "BadRequest",
@@ -235,15 +273,27 @@ pub async fn preflight(store: &Arc<Store>, req: &S3Request) -> S3Result<Response
         .ok_or_else(forbidden)?;
     let star = rule.allowed_origins.iter().any(|o| o == "*");
     let mut h: Vec<(&str, String)> = vec![
-        ("access-control-allow-origin", if star { "*".into() } else { origin.clone() }),
-        ("access-control-allow-methods", rule.allowed_methods.join(", ")),
-        ("vary", "Origin, Access-Control-Request-Headers, Access-Control-Request-Method".into()),
+        (
+            "access-control-allow-origin",
+            if star { "*".into() } else { origin.clone() },
+        ),
+        (
+            "access-control-allow-methods",
+            rule.allowed_methods.join(", "),
+        ),
+        (
+            "vary",
+            "Origin, Access-Control-Request-Headers, Access-Control-Request-Method".into(),
+        ),
     ];
     if !req_headers.is_empty() {
         h.push(("access-control-allow-headers", req_headers.join(", ")));
     }
     if !rule.expose_headers.is_empty() {
-        h.push(("access-control-expose-headers", rule.expose_headers.join(", ")));
+        h.push((
+            "access-control-expose-headers",
+            rule.expose_headers.join(", "),
+        ));
     }
     if let Some(a) = rule.max_age_seconds {
         h.push(("access-control-max-age", a.to_string()));
@@ -313,7 +363,15 @@ mod tests {
     #[test]
     fn parse_and_match() {
         let rules = parse_config(CFG).unwrap();
-        assert!(find_rule(&rules, "https://app.example.com", "PUT", &["content-type".into()]).is_some());
+        assert!(
+            find_rule(
+                &rules,
+                "https://app.example.com",
+                "PUT",
+                &["content-type".into()]
+            )
+            .is_some()
+        );
         assert!(find_rule(&rules, "https://evil.com", "PUT", &[]).is_none());
         assert!(find_rule(&rules, "https://app.example.com", "DELETE", &[]).is_none());
         assert!(find_rule(&rules, "http://app.example.com", "GET", &[]).is_none());

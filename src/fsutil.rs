@@ -142,7 +142,10 @@ impl DataDir {
     /// Open an initialized data directory, acquire its lock, and validate it.
     pub fn open(root: &Path) -> Result<Self> {
         let root_fd = open_dir(root).map_err(|e| {
-            Error::config(format!("cannot open data directory {}: {e}", root.display()))
+            Error::config(format!(
+                "cannot open data directory {}: {e}",
+                root.display()
+            ))
         })?;
         validate_private_dir(&root_fd, "data directory")?;
         let lock = StoreLock::acquire(&root_fd)?;
@@ -184,7 +187,10 @@ impl DataDir {
         match std::fs::symlink_metadata(root) {
             Ok(m) => {
                 if !m.is_dir() {
-                    return Err(Error::config(format!("{} exists and is not a directory", root.display())));
+                    return Err(Error::config(format!(
+                        "{} exists and is not a directory",
+                        root.display()
+                    )));
                 }
                 if std::fs::read_dir(root)?.next().is_some() {
                     return Err(Error::config(format!(
@@ -194,7 +200,10 @@ impl DataDir {
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                let parent = root.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+                let parent = root
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .unwrap_or(Path::new("."));
                 std::fs::create_dir_all(parent)?;
                 let name = root
                     .file_name()
@@ -241,7 +250,10 @@ impl DataDir {
     pub fn shard_dir(&self, area: Area, id: &StorageId) -> io::Result<OwnedFd> {
         let hex = id.to_hex();
         let (a, b) = (&hex[0..2], &hex[2..4]);
-        let key = (area, u16::from_be_bytes([id.as_bytes()[0], id.as_bytes()[1]]));
+        let key = (
+            area,
+            u16::from_be_bytes([id.as_bytes()[0], id.as_bytes()[1]]),
+        );
         let known = self
             .durable_shards
             .lock()
@@ -287,7 +299,11 @@ impl DataDir {
         let Some(dir) = self.existing_shard_dir(area, id)? else {
             return Ok(false);
         };
-        match rustix::fs::statat(&dir, file_name(area, id).as_str(), AtFlags::SYMLINK_NOFOLLOW) {
+        match rustix::fs::statat(
+            &dir,
+            file_name(area, id).as_str(),
+            AtFlags::SYMLINK_NOFOLLOW,
+        ) {
             Ok(_) => Ok(true),
             Err(rustix::io::Errno::NOENT) => Ok(false),
             Err(e) => Err(e.into()),
@@ -346,7 +362,10 @@ impl DataDir {
         )?;
         let file = File::from(fd);
         if !file.metadata()?.is_file() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "not a regular file"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not a regular file",
+            ));
         }
         Ok(file)
     }
@@ -367,7 +386,11 @@ impl DataDir {
     /// Filesystem availability for capacity admission.
     pub fn fs_stats(&self) -> io::Result<FsStats> {
         let st = rustix::fs::fstatvfs(&self.root_fd)?;
-        let frsize = if st.f_frsize > 0 { st.f_frsize } else { st.f_bsize };
+        let frsize = if st.f_frsize > 0 {
+            st.f_frsize
+        } else {
+            st.f_bsize
+        };
         Ok(FsStats {
             total_bytes: st.f_blocks.saturating_mul(frsize),
             avail_bytes: st.f_bavail.saturating_mul(frsize),
@@ -395,7 +418,9 @@ fn validate_private_dir(fd: &OwnedFd, what: &str) -> Result<()> {
     let st = rustix::fs::fstat(fd).map_err(io::Error::from)?;
     let uid = rustix::process::geteuid().as_raw();
     if st.st_uid != uid {
-        return Err(Error::config(format!("{what} is not owned by the service user")));
+        return Err(Error::config(format!(
+            "{what} is not owned by the service user"
+        )));
     }
     if st.st_mode & 0o022 != 0 {
         return Err(Error::config(format!(
@@ -463,7 +488,10 @@ mod tests {
         sync_fd(&f).unwrap();
         drop(f);
         dd.publish(Area::Objects, &id).unwrap();
-        let on_disk = tmp.path().join("data").join(relative_path(Area::Objects, &id));
+        let on_disk = tmp
+            .path()
+            .join("data")
+            .join(relative_path(Area::Objects, &id));
         assert_eq!(std::fs::read(&on_disk).unwrap(), b"hello");
         assert!(!dd.path_exists(Area::Staging, &id).unwrap());
 
@@ -485,7 +513,10 @@ mod tests {
         drop(dir);
         let target = tmp.path().join("secret");
         std::fs::write(&target, b"secret").unwrap();
-        let link = tmp.path().join("data").join(relative_path(Area::Objects, &id));
+        let link = tmp
+            .path()
+            .join("data")
+            .join(relative_path(Area::Objects, &id));
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(dd.open_read(Area::Objects, &id).is_err());
         assert!(dd.path_exists(Area::Objects, &id).unwrap());
@@ -506,7 +537,8 @@ mod tests {
         let (tmp, dd) = new_store();
         drop(dd);
         let root = tmp.path().join("data");
-        std::fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o770)).unwrap();
+        std::fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o770))
+            .unwrap();
         assert!(DataDir::open(&root).is_err());
     }
 }

@@ -31,7 +31,11 @@ const PUT_POINTS: &[&str] = &[
 ];
 
 fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 struct Node {
@@ -63,14 +67,24 @@ level = "info"
         std::fs::write(dir.path().join("config.toml"), cfg).unwrap();
         let creds = dir.path().join("credentials.toml");
         std::fs::write(&creds, CREDENTIALS).unwrap();
-        std::fs::set_permissions(&creds, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&creds, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .unwrap();
         let out = Command::new(BIN)
             .args(["init", "--config"])
             .arg(dir.path().join("config.toml"))
             .output()
             .unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        Self { dir, port, mport, runs: 0 }
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        Self {
+            dir,
+            port,
+            mport,
+            runs: 0,
+        }
     }
 
     fn config(&self) -> PathBuf {
@@ -95,7 +109,10 @@ level = "info"
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             if let Ok(Some(status)) = child.try_wait() {
-                panic!("server exited during startup ({status}): {}", std::fs::read_to_string(self.log(run)).unwrap());
+                panic!(
+                    "server exited during startup ({status}): {}",
+                    std::fs::read_to_string(self.log(run)).unwrap()
+                );
             }
             if std::net::TcpStream::connect(("127.0.0.1", self.port)).is_ok()
                 && readyz(self.mport).is_some_and(|s| s.contains("\"ready\":true"))
@@ -116,10 +133,19 @@ level = "info"
     }
 
     fn offline(&self, args: &[&str]) -> (bool, String) {
-        let out = Command::new(BIN).args(args).arg("--config").arg(self.config()).output().unwrap();
+        let out = Command::new(BIN)
+            .args(args)
+            .arg("--config")
+            .arg(self.config())
+            .output()
+            .unwrap();
         (
             out.status.success(),
-            format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
         )
     }
 }
@@ -128,7 +154,11 @@ fn readyz(port: u16) -> Option<String> {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    write!(s, "GET /readyz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n").ok()?;
+    write!(
+        s,
+        "GET /readyz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n"
+    )
+    .ok()?;
     let mut buf = String::new();
     s.read_to_string(&mut buf).ok()?;
     Some(buf)
@@ -182,7 +212,10 @@ fn new_body() -> Vec<u8> {
 fn assert_whole(body: &[u8], ctx: &str) -> char {
     assert!(!body.is_empty(), "{ctx}: empty body");
     let first = body[0];
-    assert!(body.iter().all(|b| *b == first), "{ctx}: partial or mixed object");
+    assert!(
+        body.iter().all(|b| *b == first),
+        "{ctx}: partial or mixed object"
+    );
     assert_eq!(body.len(), 300_000, "{ctx}: wrong length");
     first as char
 }
@@ -202,7 +235,11 @@ async fn crash_put(point: &str, overwrite: bool) {
     let fp = format!("{point}=abort");
     let (mut crashing, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
     let r = c.put("/docs/k", &new_body()).await;
-    assert!(wait_crash(&mut crashing), "{ctx}: failpoint not reached (status {})", r.status);
+    assert!(
+        wait_crash(&mut crashing),
+        "{ctx}: failpoint not reached (status {})",
+        r.status
+    );
     assert_ne!(r.status, 200, "{ctx}: acknowledged despite crash");
 
     let (after, _) = node.spawn(&[]);
@@ -213,7 +250,10 @@ async fn crash_put(point: &str, overwrite: bool) {
             let v = assert_whole(&g.body, &ctx);
             if v == 'n' {
                 // Only possible once the commit itself happened.
-                assert!(point == "after_commit:object", "{ctx}: new object visible though crash preceded commit");
+                assert!(
+                    point == "after_commit:object",
+                    "{ctx}: new object visible though crash preceded commit"
+                );
             }
         }
         404 => assert!(!overwrite, "{ctx}: previously committed object lost"),
@@ -244,12 +284,26 @@ async fn ops_02_crash_matrix_overwrites() {
 }
 
 async fn initiate(c: &Client, key: &str) -> String {
-    c.send("POST", &format!("/docs/{key}"), "uploads", &[], Payload::Signed(vec![])).await.one("UploadId")
+    c.send(
+        "POST",
+        &format!("/docs/{key}"),
+        "uploads",
+        &[],
+        Payload::Signed(vec![]),
+    )
+    .await
+    .one("UploadId")
 }
 
 async fn upload_part(c: &Client, key: &str, id: &str, n: u32, body: &[u8]) -> Resp {
-    c.send("PUT", &format!("/docs/{key}"), &format!("partNumber={n}&uploadId={id}"), &[], Payload::Signed(body.to_vec()))
-        .await
+    c.send(
+        "PUT",
+        &format!("/docs/{key}"),
+        &format!("partNumber={n}&uploadId={id}"),
+        &[],
+        Payload::Signed(body.to_vec()),
+    )
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -265,12 +319,19 @@ async fn ops_02_crash_matrix_part_replacement() {
         let c = node.client();
         c.create_bucket("docs").await;
         let id = initiate(&c, "mp").await;
-        let old_etag = upload_part(&c, "mp", &id, 1, &old_body()).await.header("etag").unwrap();
+        let old_etag = upload_part(&c, "mp", &id, 1, &old_body())
+            .await
+            .header("etag")
+            .unwrap();
         stop(seed);
         let fp = format!("{point}=abort");
         let (mut crashing, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
         let r = upload_part(&c, "mp", &id, 1, &new_body()).await;
-        assert!(wait_crash(&mut crashing), "{ctx}: not reached ({})", r.status);
+        assert!(
+            wait_crash(&mut crashing),
+            "{ctx}: not reached ({})",
+            r.status
+        );
         let (after, _) = node.spawn(&[]);
         let l = c.get("/docs/mp", &format!("uploadId={id}")).await;
         assert_eq!(l.status, 200, "{ctx}: upload lost: {}", l.text());
@@ -281,7 +342,15 @@ async fn ops_02_crash_matrix_part_replacement() {
         let body = format!(
             "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{etag}</ETag></Part></CompleteMultipartUpload>"
         );
-        let r = c.send("POST", "/docs/mp", &format!("uploadId={id}"), &[], Payload::Signed(body.into_bytes())).await;
+        let r = c
+            .send(
+                "POST",
+                "/docs/mp",
+                &format!("uploadId={id}"),
+                &[],
+                Payload::Signed(body.into_bytes()),
+            )
+            .await;
         assert_eq!(r.status, 200, "{ctx}: {}", r.text());
         let v = assert_whole(&c.get("/docs/mp", "").await.body, &ctx);
         assert_eq!(v == 'n', point == "after_commit:part", "{ctx}");
@@ -311,7 +380,10 @@ async fn ops_02_crash_matrix_completion() {
         c.create_bucket("docs").await;
         c.put("/docs/mp", &old_body()).await;
         let id = initiate(&c, "mp").await;
-        let e = upload_part(&c, "mp", &id, 1, &new_body()).await.header("etag").unwrap();
+        let e = upload_part(&c, "mp", &id, 1, &new_body())
+            .await
+            .header("etag")
+            .unwrap();
         stop(seed);
         let body = format!(
             "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{e}</ETag></Part></CompleteMultipartUpload>"
@@ -319,20 +391,46 @@ async fn ops_02_crash_matrix_completion() {
         let fp = format!("{point}=abort");
         let (mut crashing, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
         let r = c
-            .send("POST", "/docs/mp", &format!("uploadId={id}"), &[], Payload::Signed(body.clone().into_bytes()))
+            .send(
+                "POST",
+                "/docs/mp",
+                &format!("uploadId={id}"),
+                &[],
+                Payload::Signed(body.clone().into_bytes()),
+            )
             .await;
-        assert!(wait_crash(&mut crashing), "{ctx}: not reached ({})", r.status);
+        assert!(
+            wait_crash(&mut crashing),
+            "{ctx}: not reached ({})",
+            r.status
+        );
         let (after, _) = node.spawn(&[]);
         let v = assert_whole(&c.get("/docs/mp", "").await.body, &ctx);
         if point == "after_commit:completion" {
             assert_eq!(v, 'n', "{ctx}: committed completion lost");
             // Retry returns the receipt.
-            let r = c.send("POST", "/docs/mp", &format!("uploadId={id}"), &[], Payload::Signed(body.into_bytes())).await;
+            let r = c
+                .send(
+                    "POST",
+                    "/docs/mp",
+                    &format!("uploadId={id}"),
+                    &[],
+                    Payload::Signed(body.into_bytes()),
+                )
+                .await;
             assert_eq!(r.status, 200, "{ctx}: receipt retry: {}", r.text());
         } else {
             assert_eq!(v, 'o', "{ctx}: partial completion visible");
             // Upload reopened with its committed part; completion succeeds now.
-            let r = c.send("POST", "/docs/mp", &format!("uploadId={id}"), &[], Payload::Signed(body.into_bytes())).await;
+            let r = c
+                .send(
+                    "POST",
+                    "/docs/mp",
+                    &format!("uploadId={id}"),
+                    &[],
+                    Payload::Signed(body.into_bytes()),
+                )
+                .await;
             assert_eq!(r.status, 200, "{ctx}: retry after recovery: {}", r.text());
             assert_eq!(assert_whole(&c.get("/docs/mp", "").await.body, &ctx), 'n');
         }
@@ -384,7 +482,11 @@ async fn ops_02_crash_matrix_delete_and_gc() {
         assert_eq!(assert_whole(&c.get("/docs/k", "").await.body, &ctx), 'n');
         stop(after);
         verify_offline(&node, &ctx);
-        assert_eq!(files_under(&node.data().join("objects")).len(), 1, "{ctx}: garbage replayed idempotently");
+        assert_eq!(
+            files_under(&node.data().join("objects")).len(),
+            1,
+            "{ctx}: garbage replayed idempotently"
+        );
     }
 }
 
@@ -397,15 +499,28 @@ async fn fs_04_injected_io_failures_never_acknowledge() {
     c.create_bucket("docs").await;
     c.put("/docs/k", &old_body()).await;
     stop(seed);
-    for (fp, want_status) in [("sync=eio", 500u16), ("sync_dir=eio", 500), ("write=enospc", 503), ("commit:object=eio", 500)] {
+    for (fp, want_status) in [
+        ("sync=eio", 500u16),
+        ("sync_dir=eio", 500),
+        ("write=enospc", 503),
+        ("commit:object=eio", 500),
+    ] {
         let (child, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp)]);
         let r = c.put("/docs/k", &new_body()).await;
         assert_eq!(r.status, want_status, "{fp}: {}", r.text());
-        assert_eq!(assert_whole(&c.get("/docs/k", "").await.body, fp), 'o', "{fp}: old object replaced");
+        assert_eq!(
+            assert_whole(&c.get("/docs/k", "").await.body, fp),
+            'o',
+            "{fp}: old object replaced"
+        );
         if fp.contains("eio") && !fp.starts_with("commit") {
             let rz = readyz(node.mport).unwrap();
             assert!(rz.contains("\"mutations_halted\":true"), "{fp}: {rz}");
-            assert_eq!(c.put("/docs/other", b"x").await.status, 503, "{fp}: writes refused while halted");
+            assert_eq!(
+                c.put("/docs/other", b"x").await.status,
+                503,
+                "{fp}: writes refused while halted"
+            );
         }
         stop(child);
     }
@@ -438,10 +553,16 @@ async fn fs_03_injected_storage_id_collisions_preserve_existing_files() {
     assert_eq!(r.status, 200);
     assert_eq!(assert_whole(&c.get("/docs/a", "").await.body, "a"), 'o');
     assert_eq!(assert_whole(&c.get("/docs/b", "").await.body, "b"), 'n');
-    assert_eq!(std::fs::read(squat_dir.join(&squat_id)).unwrap(), b"squatter");
+    assert_eq!(
+        std::fs::read(squat_dir.join(&squat_id)).unwrap(),
+        b"squatter"
+    );
     stop(child);
     let (ok, out) = node.offline(&["check", "--full"]);
-    assert!(!ok && out.contains("untracked"), "squatter reported, not deleted:\n{out}");
+    assert!(
+        !ok && out.contains("untracked"),
+        "squatter reported, not deleted:\n{out}"
+    );
     assert!(squat_dir.join(&squat_id).exists());
 }
 
@@ -451,15 +572,33 @@ async fn ops_07_logs_exclude_secrets_and_keys() {
     let (child, run) = node.spawn(&[]);
     let c = node.client();
     c.create_bucket("docs").await;
-    c.put_h("/docs/very-secret-key-name.pdf", &[("x-amz-meta-ssn", "123-45-6789")], b"body").await;
+    c.put_h(
+        "/docs/very-secret-key-name.pdf",
+        &[("x-amz-meta-ssn", "123-45-6789")],
+        b"body",
+    )
+    .await;
     let url = c.presign("GET", "/docs/very-secret-key-name.pdf", 300, None);
     let sig = url.split("X-Amz-Signature=").nth(1).unwrap().to_string();
     raw("GET", &url, &[], vec![]).await;
-    Client::new(&c.base, ("admin-key", "wrongwrongwrongwrongwrongwrongwrong")).get("/docs/x", "").await;
+    Client::new(
+        &c.base,
+        ("admin-key", "wrongwrongwrongwrongwrongwrongwrong"),
+    )
+    .get("/docs/x", "")
+    .await;
     stop(child);
     let log = std::fs::read_to_string(node.log(run)).unwrap();
     assert!(log.contains("\"operation\":\"PutObject\""), "{log}");
-    for secret in [ADMIN.1, APP.1, sig.as_str(), "very-secret-key-name", "123-45-6789", "Signature=", "X-Amz-Credential"] {
+    for secret in [
+        ADMIN.1,
+        APP.1,
+        sig.as_str(),
+        "very-secret-key-name",
+        "123-45-6789",
+        "Signature=",
+        "X-Amz-Credential",
+    ] {
         assert!(!log.contains(secret), "log leaks {secret}");
     }
     let _ = Path::new("");

@@ -29,26 +29,44 @@ impl Maintenance {
         let cancel = CancellationToken::new();
         let gc_every = Duration::from_secs(store.config.maintenance.garbage_interval_seconds);
         let mut tasks = Vec::new();
-        tasks.push(spawn_loop(store.clone(), cancel.clone(), gc_every, "gc", |s| {
-            Box::pin(async move {
-                // Drain the eligible backlog in bounded batches.
-                for _ in 0..100 {
-                    if gc_once(&s).await? == 0 {
-                        break;
+        tasks.push(spawn_loop(
+            store.clone(),
+            cancel.clone(),
+            gc_every,
+            "gc",
+            |s| {
+                Box::pin(async move {
+                    // Drain the eligible backlog in bounded batches.
+                    for _ in 0..100 {
+                        if gc_once(&s).await? == 0 {
+                            break;
+                        }
                     }
-                }
-                Ok(())
-            })
-        }));
-        tasks.push(spawn_loop(store.clone(), cancel.clone(), Duration::from_secs(60), "expiry", |s| {
-            Box::pin(async move { expire_once(&s).await.map(|_| ()) })
-        }));
-        tasks.push(spawn_loop(store.clone(), cancel.clone(), Duration::from_secs(60), "checkpoint", |s| {
-            Box::pin(async move { checkpoint(&s).await })
-        }));
-        tasks.push(spawn_loop(store.clone(), cancel.clone(), Duration::from_secs(30), "gauges", |s| {
-            Box::pin(async move { refresh_gauges(&s).await })
-        }));
+                    Ok(())
+                })
+            },
+        ));
+        tasks.push(spawn_loop(
+            store.clone(),
+            cancel.clone(),
+            Duration::from_secs(60),
+            "expiry",
+            |s| Box::pin(async move { expire_once(&s).await.map(|_| ()) }),
+        ));
+        tasks.push(spawn_loop(
+            store.clone(),
+            cancel.clone(),
+            Duration::from_secs(60),
+            "checkpoint",
+            |s| Box::pin(async move { checkpoint(&s).await }),
+        ));
+        tasks.push(spawn_loop(
+            store.clone(),
+            cancel.clone(),
+            Duration::from_secs(30),
+            "gauges",
+            |s| Box::pin(async move { refresh_gauges(&s).await }),
+        ));
         tasks.push(spawn_loop(
             store.clone(),
             cancel.clone(),
@@ -67,9 +85,16 @@ impl Maintenance {
     }
 }
 
-type JobFn = fn(Arc<Store>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>;
+type JobFn =
+    fn(Arc<Store>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>;
 
-fn spawn_loop(store: Arc<Store>, cancel: CancellationToken, every: Duration, name: &'static str, job: JobFn) -> JoinHandle<()> {
+fn spawn_loop(
+    store: Arc<Store>,
+    cancel: CancellationToken,
+    every: Duration,
+    name: &'static str,
+    job: JobFn,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         // First run after one interval: startup recovery already handled
         // interrupted work, and this keeps startup free of background writes.
@@ -97,8 +122,14 @@ pub async fn gc_once(store: &Arc<Store>) -> Result<usize> {
     }
     let limit = store.config.maintenance.garbage_batch_size;
     let now = now_ms();
-    let batch = store.db.read(move |c| queries::garbage_batch(c, now, limit)).await?;
-    let batch: Vec<_> = batch.into_iter().filter(|(id, _, _)| !store.is_blob_active(id)).collect();
+    let batch = store
+        .db
+        .read(move |c| queries::garbage_batch(c, now, limit))
+        .await?;
+    let batch: Vec<_> = batch
+        .into_iter()
+        .filter(|(id, _, _)| !store.is_blob_active(id))
+        .collect();
     if batch.is_empty() {
         return Ok(0);
     }
@@ -156,8 +187,14 @@ pub async fn gc_once(store: &Arc<Store>) -> Result<usize> {
         .filter(|(id, _, _)| removed.contains(id))
         .map(|(_, _, s)| *s)
         .sum();
-    store.metrics.gc_deleted_blobs.fetch_add(deleted as u64, Ordering::Relaxed);
-    store.metrics.gc_deleted_bytes.fetch_add(bytes, Ordering::Relaxed);
+    store
+        .metrics
+        .gc_deleted_blobs
+        .fetch_add(deleted as u64, Ordering::Relaxed);
+    store
+        .metrics
+        .gc_deleted_bytes
+        .fetch_add(bytes, Ordering::Relaxed);
     Ok(n)
 }
 
@@ -204,9 +241,15 @@ pub async fn expire_once(store: &Arc<Store>) -> Result<usize> {
             .await?;
         if let Some(bytes) = released {
             store.capacity.release_part_bytes(bytes);
-            store.metrics.multipart_expired.fetch_add(1, Ordering::Relaxed);
+            store
+                .metrics
+                .multipart_expired
+                .fetch_add(1, Ordering::Relaxed);
             expired += 1;
-            tracing::info!(event = "multipart_expired", "expired an inactive multipart upload");
+            tracing::info!(
+                event = "multipart_expired",
+                "expired an inactive multipart upload"
+            );
         }
     }
     let now = now_ms();
@@ -227,7 +270,10 @@ pub async fn checkpoint(store: &Arc<Store>) -> Result<()> {
         })
         .await?;
     store.metrics.checkpoints.fetch_add(1, Ordering::Relaxed);
-    let wal = store.data.root().join(format!("{}-wal", crate::fsutil::DB_FILE));
+    let wal = store
+        .data
+        .root()
+        .join(format!("{}-wal", crate::fsutil::DB_FILE));
     let size = std::fs::metadata(wal).map(|m| m.len()).unwrap_or(0);
     store.metrics.wal_bytes.store(size, Ordering::Relaxed);
     Ok(())
@@ -247,14 +293,20 @@ pub async fn refresh_gauges(store: &Arc<Store>) -> Result<()> {
 
 /// Verify one bucket's counters per run (bounded work).
 pub async fn verify_counters(store: &Arc<Store>) -> Result<()> {
-    let buckets = store.db.read(|c| queries::list_buckets(c, "", "", 100_000)).await?;
+    let buckets = store
+        .db
+        .read(|c| queries::list_buckets(c, "", "", 100_000))
+        .await?;
     if buckets.is_empty() {
         return Ok(());
     }
     let idx = (now_ms() / 1000 / 21_600) as usize % buckets.len();
     let b = buckets[idx].clone();
     let id = b.id;
-    let (count, bytes) = store.db.read(move |c| queries::bucket_actual_usage(c, &id)).await?;
+    let (count, bytes) = store
+        .db
+        .read(move |c| queries::bucket_actual_usage(c, &id))
+        .await?;
     if count != b.object_count || bytes != b.logical_bytes {
         store.integrity_fault(&format!(
             "bucket {} counters ({}, {}) differ from actual usage ({count}, {bytes})",

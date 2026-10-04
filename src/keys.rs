@@ -83,7 +83,9 @@ pub fn validate_bucket_name(s: &str) -> Result<(), &'static str> {
         .iter()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'.' || *c == b'-')
     {
-        return Err("bucket names can consist only of lowercase letters, numbers, dots, and hyphens");
+        return Err(
+            "bucket names can consist only of lowercase letters, numbers, dots, and hyphens",
+        );
     }
     let alnum = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
     if !alnum(b[0]) || !alnum(b[b.len() - 1]) {
