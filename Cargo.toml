@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
 description = "Compact single-host S3-compatible object storage"
-license-file = "LICENSE"
+license = "Apache-2.0"
+repository = "https://github.com/tirtauntario/storlite"
+homepage = "https://github.com/tirtauntario/storlite"
+readme = "README.md"
+keywords = ["s3", "object-storage", "sqlite", "storage", "server"]
+categories = ["command-line-utilities", "web-programming::http-server"]
+# Distributed as GitHub Release binaries and a GHCR image; see docs/releasing.md
+# before publishing to crates.io.
 publish = false
 
 [features]

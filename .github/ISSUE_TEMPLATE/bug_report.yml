@@ -1,0 +1,50 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security vulnerabilities here. See SECURITY.md.
+        Never paste secrets, credentials files, presigned URLs or signatures.
+  - type: input
+    id: version
+    attributes:
+      label: storlite version
+      description: Output of `storlite --version`, or the image tag
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options: [Docker / Compose, systemd / standalone binary, Built from source, Other]
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS, architecture and filesystem
+      placeholder: Ubuntu 24.04, x86_64, ext4
+  - type: input
+    id: client
+    attributes:
+      label: S3 client and version
+      placeholder: aws-cli 2.x / boto3 1.x / aws-sdk-s3 (Ruby) / Rails Active Storage
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (redacted)
+      render: text

@@ -1,12 +1,15 @@
 # Single-process deployment: no database or worker containers.
-#   docker compose -f deploy/compose.yaml run --rm storlite init --config /etc/storlite/config.toml
-#   docker compose -f deploy/compose.yaml up -d
+# See docs/installation.md#docker for the full walkthrough. In short:
+#   1. put credentials.toml, tls.crt and tls.key in ./secrets/
+#      (on Linux: chown 65532:65532 secrets/* && chmod 0400 secrets/*)
+#   2. docker compose run --rm storlite init --config /etc/storlite/config.toml
+#   3. docker compose up -d
+# To run a locally built image instead of the published one:
+#   docker build -f deploy/Dockerfile -t storlite:local .
+#   STORLITE_IMAGE=storlite:local docker compose up -d
 services:
   storlite:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    image: storlite:local
+    image: ${STORLITE_IMAGE:-ghcr.io/tirtauntario/storlite:latest}
     ports:
       - "9000:9000"
     volumes:
@@ -14,11 +17,11 @@ services:
       - ./config.container.toml:/etc/storlite/config.toml:ro
     secrets:
       - source: storlite-credentials
-        mode: 0400
-      - source: storlite-tls.crt
-        mode: 0444
-      - source: storlite-tls.key
-        mode: 0400
+        target: storlite-credentials.toml
+      - source: storlite-tls-crt
+        target: storlite-tls.crt
+      - source: storlite-tls-key
+        target: storlite-tls.key
     # Stop the old process before starting a new one: never two writers.
     stop_grace_period: 40s
     restart: unless-stopped
@@ -32,9 +35,9 @@ services:
 secrets:
   storlite-credentials:
     file: ./secrets/credentials.toml
-  storlite-tls.crt:
+  storlite-tls-crt:
     file: ./secrets/tls.crt
-  storlite-tls.key:
+  storlite-tls-key:
     file: ./secrets/tls.key
 
 volumes:

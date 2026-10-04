@@ -1,0 +1,42 @@
+# systemd unit for a standalone storlite install. See docs/installation.md.
+#   install -m 0644 storlite.service /etc/systemd/system/storlite.service
+#   systemctl daemon-reload && systemctl enable --now storlite
+[Unit]
+Description=storlite S3-compatible object storage
+Documentation=https://github.com/tirtauntario/storlite
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=storlite
+Group=storlite
+ExecStart=/usr/local/bin/storlite serve --config /etc/storlite/config.toml
+# SIGHUP reloads the credentials file atomically.
+ExecReload=/bin/kill -HUP $MAINPID
+# SIGTERM drains requests within maintenance.shutdown_grace_seconds (30 s by
+# default); allow a margin before systemd escalates to SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=8192
+
+# Hardening: only the data directory is writable.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/storlite
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

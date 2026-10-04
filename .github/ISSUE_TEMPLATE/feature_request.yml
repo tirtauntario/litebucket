@@ -1,0 +1,19 @@
+name: Feature or compatibility request
+description: Propose a feature, or report an S3 client that needs something unsupported
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check docs/compatibility.md first: some S3 features are intentionally out of scope.
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you need, and why?
+      description: Include the client/library and the operation or header involved, if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

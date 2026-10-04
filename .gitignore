@@ -1,3 +1,5 @@
 /target
 .interop/
 .DS_Store
+deploy/secrets/
+/dist/
