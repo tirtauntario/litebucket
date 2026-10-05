@@ -1,4 +1,4 @@
--- storlite migration 0001: initial schema.
+-- litebucket migration 0001: initial schema.
 -- Derived from docs/reference-schema.sql (specification 1.0) with additions
 -- marked below. Cross-table invariants are enforced by application transactions.
 CREATE TABLE schema_migrations (
@@ -72,7 +72,7 @@ CREATE TABLE multipart_uploads (
     closed_at_ms INTEGER CHECK(closed_at_ms IS NULL OR closed_at_ms >= 0),
     receipt_expires_at_ms INTEGER
         CHECK(receipt_expires_at_ms IS NULL OR receipt_expires_at_ms >= 0),
-    -- storlite additions to the reference schema:
+    -- litebucket additions to the reference schema:
     -- 1 when the client chose the checksum algorithm/type at initiation.
     checksum_explicit INTEGER NOT NULL DEFAULT 0 CHECK(checksum_explicit IN (0, 1)),
     -- WRITING output blob owned by a COMPLETING upload, for recovery linkage.

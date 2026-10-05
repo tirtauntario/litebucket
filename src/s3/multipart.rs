@@ -360,8 +360,7 @@ fn fingerprint(
     full_checksum: Option<(Algorithm, String)>,
 ) -> [u8; 32] {
     let mut h = Sha256::new();
-    // Pre-rename domain tag, kept so stored completion fingerprints still match.
-    h.update(b"storlite-complete-v1\n");
+    h.update(b"litebucket-complete-v1\n");
     h.update(upload_id.as_bytes());
     for p in parts {
         h.update(format!("\n{}:{}:", p.number, p.etag).as_bytes());

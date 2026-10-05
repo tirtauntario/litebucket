@@ -1,4 +1,4 @@
--- storlite migration 0003: access keys, grants, and the admin audit log live
+-- litebucket migration 0003: access keys, grants, and the admin audit log live
 -- in the metadata database (managed through the admin API).
 -- secret_scheme 0 = plaintext, 1 = AES-256-GCM under master key version 1.
 -- The AEAD binds each ciphertext to the store id and access key id.

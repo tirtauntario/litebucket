@@ -25,9 +25,8 @@ use crate::metadata::{self, migrations, now_ms, with_write_tx};
 use crate::secrets::{MasterKey, SecretCodec};
 use crate::store::open_offline;
 
-/// Backup format marker. Keeps the pre-rename name so backups made by
-/// earlier releases still restore.
-pub const FORMAT: &str = "storlite-backup-v1";
+/// Backup format marker.
+pub const FORMAT: &str = "litebucket-backup-v1";
 const INCOMPLETE: &str = "BACKUP_INCOMPLETE";
 const COMPLETE: &str = "BACKUP_COMPLETE";
 const MANIFEST: &str = "manifest.json";
@@ -40,7 +39,6 @@ pub struct Manifest {
     pub region: String,
     pub storage_format: i64,
     pub created_at_ms: i64,
-    #[serde(rename = "storlite_version")]
     pub litebucket_version: String,
     pub sqlite_version: String,
     pub database_sha256: String,
