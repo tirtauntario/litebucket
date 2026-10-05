@@ -30,7 +30,7 @@ from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BIN = os.environ.get("STORLITE_BIN", os.path.join(ROOT, "target/release/storlite"))
+BIN = os.environ.get("LITEBUCKET_BIN", os.path.join(ROOT, "target/release/litebucket"))
 MIB = 1024 * 1024
 
 
@@ -83,7 +83,7 @@ def main():
     ap.add_argument("--large-mib", type=int, default=1024)
     ap.add_argument("--small-count", type=int, default=2000)
     args = ap.parse_args()
-    work = tempfile.mkdtemp(prefix="storlite-bench-")
+    work = tempfile.mkdtemp(prefix="litebucket-bench-")
     port, mport = free_port(), free_port()
     with open(os.path.join(work, "config.toml"), "w") as f:
         f.write(f"""data_dir = "./data"
@@ -234,4 +234,4 @@ if __name__ == "__main__":
     try:
         main()
     finally:
-        subprocess.run(["pkill", "-f", "storlite-bench-"], capture_output=True)
+        subprocess.run(["pkill", "-f", "litebucket-bench-"], capture_output=True)

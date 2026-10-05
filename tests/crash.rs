@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use common::*;
 
-const BIN: &str = env!("CARGO_BIN_EXE_storlite");
+const BIN: &str = env!("CARGO_BIN_EXE_litebucket");
 
 const PUT_POINTS: &[&str] = &[
     "after_commit:register",
@@ -101,7 +101,7 @@ level = "info"
         let log = std::fs::File::create(self.log(run)).unwrap();
         let mut cmd = Command::new(BIN);
         cmd.args(["serve", "--config"]).arg(self.config());
-        cmd.env_remove("STORLITE_FAILPOINTS");
+        cmd.env_remove("LITEBUCKET_FAILPOINTS");
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -233,7 +233,7 @@ async fn crash_put(point: &str, overwrite: bool) {
     stop(seed);
 
     let fp = format!("{point}=abort");
-    let (mut crashing, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
+    let (mut crashing, _) = node.spawn(&[("LITEBUCKET_FAILPOINTS", fp.as_str())]);
     let r = c.put("/docs/k", &new_body()).await;
     assert!(
         wait_crash(&mut crashing),
@@ -325,7 +325,7 @@ async fn ops_02_crash_matrix_part_replacement() {
             .unwrap();
         stop(seed);
         let fp = format!("{point}=abort");
-        let (mut crashing, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
+        let (mut crashing, _) = node.spawn(&[("LITEBUCKET_FAILPOINTS", fp.as_str())]);
         let r = upload_part(&c, "mp", &id, 1, &new_body()).await;
         assert!(
             wait_crash(&mut crashing),
@@ -389,7 +389,7 @@ async fn ops_02_crash_matrix_completion() {
             "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{e}</ETag></Part></CompleteMultipartUpload>"
         );
         let fp = format!("{point}=abort");
-        let (mut crashing, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
+        let (mut crashing, _) = node.spawn(&[("LITEBUCKET_FAILPOINTS", fp.as_str())]);
         let r = c
             .send(
                 "POST",
@@ -450,7 +450,7 @@ async fn ops_02_crash_matrix_delete_and_gc() {
         c.put("/docs/k", &old_body()).await;
         stop(seed);
         let fp = format!("{point}=abort");
-        let (mut crashing, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
+        let (mut crashing, _) = node.spawn(&[("LITEBUCKET_FAILPOINTS", fp.as_str())]);
         let _ = c.delete("/docs/k").await;
         assert!(wait_crash(&mut crashing), "{ctx}: not reached");
         let (after, _) = node.spawn(&[]);
@@ -476,7 +476,7 @@ async fn ops_02_crash_matrix_delete_and_gc() {
         c.delete("/docs/gone").await;
         stop(seed);
         let fp = format!("{point}=abort");
-        let (mut crashing, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
+        let (mut crashing, _) = node.spawn(&[("LITEBUCKET_FAILPOINTS", fp.as_str())]);
         assert!(wait_crash(&mut crashing), "{ctx}: collector did not run");
         let (after, _) = node.spawn(&[]);
         assert_eq!(assert_whole(&c.get("/docs/k", "").await.body, &ctx), 'n');
@@ -505,7 +505,7 @@ async fn fs_04_injected_io_failures_never_acknowledge() {
         ("write=enospc", 503),
         ("commit:object=eio", 500),
     ] {
-        let (child, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp)]);
+        let (child, _) = node.spawn(&[("LITEBUCKET_FAILPOINTS", fp)]);
         let r = node.client().put("/docs/k", &new_body()).await;
         // `sync_dir` (new staging shard after a restart) and `write` fail
         // before the body is fully read, so the server answers and closes
@@ -557,7 +557,7 @@ async fn fs_03_injected_storage_id_collisions_preserve_existing_files() {
     std::fs::create_dir_all(&squat_dir).unwrap();
     std::fs::write(squat_dir.join(&squat_id), b"squatter").unwrap();
     let forced = format!("{id},{squat_id}");
-    let (child, _) = node.spawn(&[("STORLITE_FORCE_STORAGE_IDS", forced.as_str())]);
+    let (child, _) = node.spawn(&[("LITEBUCKET_FORCE_STORAGE_IDS", forced.as_str())]);
     let r = c.put("/docs/b", &new_body()).await;
     assert_eq!(r.status, 200, "{}", r.text());
     let r = c.put("/docs/c", b"third").await;
@@ -633,7 +633,7 @@ async fn admin_changes_are_atomic_across_crashes() {
     for (point, committed) in [("before_commit:admin", false), ("after_commit:admin", true)] {
         let mut node = Node::new("");
         let fp = format!("{point}=abort");
-        let (mut child, _) = node.spawn(&[("STORLITE_FAILPOINTS", fp.as_str())]);
+        let (mut child, _) = node.spawn(&[("LITEBUCKET_FAILPOINTS", fp.as_str())]);
         let out = admin_cli(
             &node,
             &["key", "create", "--id", "crash-key", "--format", "env"],

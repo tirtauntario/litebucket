@@ -1,5 +1,5 @@
 //! Minimal blocking HTTP/1.1 client for the admin Unix socket (used by the
-//! `storlite admin` commands; no async runtime needed).
+//! `litebucket admin` commands; no async runtime needed).
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -51,14 +51,14 @@ impl AdminClient {
         };
         let mut stream = UnixStream::connect(&self.socket).map_err(|e| {
             Error::other(format!(
-                "cannot connect to the admin socket {}: {e}\n  Is `storlite serve` running with this config? Run the command as the server's user or root (in Docker: `docker compose exec storlite storlite admin ...`).",
+                "cannot connect to the admin socket {}: {e}\n  Is `litebucket serve` running with this config? Run the command as the server's user or root (in Docker: `docker compose exec litebucket litebucket admin ...`).",
                 self.socket.display()
             ))
         })?;
         stream.set_read_timeout(Some(Duration::from_secs(60)))?;
         stream.set_write_timeout(Some(Duration::from_secs(60)))?;
         let head = format!(
-            "{method} {path} HTTP/1.1\r\nHost: storlite-admin\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            "{method} {path} HTTP/1.1\r\nHost: litebucket-admin\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
             body.len()
         );
         stream.write_all(head.as_bytes())?;

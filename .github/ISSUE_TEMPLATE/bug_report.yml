@@ -10,8 +10,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: storlite version
-      description: Output of `storlite --version`, or the image tag
+      label: litebucket version
+      description: Output of `litebucket --version`, or the image tag
     validations:
       required: true
   - type: dropdown

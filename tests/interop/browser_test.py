@@ -19,18 +19,18 @@ import threading
 import boto3
 from botocore.config import Config
 
-ENDPOINT = os.environ["STORLITE_ENDPOINT"]
+ENDPOINT = os.environ["LITEBUCKET_ENDPOINT"]
 if not (ENDPOINT.startswith("http://127.0.0.1:") or ENDPOINT.startswith("https://127.0.0.1:")):
     raise SystemExit("refusing non-local endpoint")
-CA = os.environ.get("STORLITE_CA_BUNDLE")
+CA = os.environ.get("LITEBUCKET_CA_BUNDLE")
 CHROME = os.environ.get("CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
 s3 = boto3.client(
     "s3",
     endpoint_url=ENDPOINT,
-    region_name=os.environ["STORLITE_REGION"],
-    aws_access_key_id=os.environ["STORLITE_KEY_ID"],
-    aws_secret_access_key=os.environ["STORLITE_SECRET"],
+    region_name=os.environ["LITEBUCKET_REGION"],
+    aws_access_key_id=os.environ["LITEBUCKET_KEY_ID"],
+    aws_secret_access_key=os.environ["LITEBUCKET_SECRET"],
     config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     verify=CA if CA else None,
 )

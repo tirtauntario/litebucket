@@ -50,7 +50,7 @@ as one-way hashes.
   refresh. Changes apply to the next request; requests already authorized
   keep their snapshot (the same boundary SIGHUP reload had).
 - **Safety rails.** Changes that would leave no enabled, unexpired admin key
-  are refused. `storlite admin recover` (offline, under the store lock)
+  are refused. `litebucket admin recover` (offline, under the store lock)
   creates an admin key directly; `--reset-keys` deletes all keys first for a
   lost master key, and without it recovery first proves the configured key
   opens every existing secret so keys sealed under different master keys are

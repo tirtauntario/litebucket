@@ -214,7 +214,7 @@ pub async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> 
         }
         h.insert(
             http::header::SERVER,
-            http::HeaderValue::from_static("storlite"),
+            http::HeaderValue::from_static("litebucket"),
         );
     }
     if let (Some(origin), Some(bucket)) = (origin, bucket_name.as_deref())

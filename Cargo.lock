@@ -655,6 +655,52 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
+name = "litebucket"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "base64",
+ "bytes",
+ "clap",
+ "crc",
+ "crc32c",
+ "crc32fast",
+ "futures-util",
+ "getrandom 0.3.4",
+ "hex",
+ "hmac",
+ "http",
+ "http-body",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-util",
+ "md-5",
+ "percent-encoding",
+ "proptest",
+ "ring",
+ "rusqlite",
+ "rustix",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "subtle",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "toml",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1222,52 +1268,6 @@ dependencies = [
  "js-sys",
  "rsqlite-vfs",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "storlite"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64",
- "bytes",
- "clap",
- "crc",
- "crc32c",
- "crc32fast",
- "futures-util",
- "getrandom 0.3.4",
- "hex",
- "hmac",
- "http",
- "http-body",
- "http-body-util",
- "httpdate",
- "hyper",
- "hyper-util",
- "md-5",
- "percent-encoding",
- "proptest",
- "ring",
- "rusqlite",
- "rustix",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "subtle",
- "tempfile",
- "thiserror",
- "time",
- "tokio",
- "tokio-rustls",
- "tokio-util",
- "toml",
- "tower",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

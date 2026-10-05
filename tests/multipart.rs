@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use storlite::checksums::{self, Algorithm, b64};
+use litebucket::checksums::{self, Algorithm, b64};
 
 const MIB: usize = 1024 * 1024;
 
@@ -154,7 +154,9 @@ async fn mpu_01_parallel_parts_and_replacement() {
     // Parts go to multipart/aa/bb/id; after completion they become garbage.
     assert!(files_under(&s.data_dir().join("staging")).is_empty());
     let store = s.store();
-    storlite::maintenance::refresh_gauges(&store).await.unwrap();
+    litebucket::maintenance::refresh_gauges(&store)
+        .await
+        .unwrap();
     assert_eq!(
         store.maintenance_gauges().0,
         4,
@@ -614,8 +616,8 @@ async fn mpu_06_completion_conditions_and_quota_at_commit() {
     s.store()
         .db
         .write(|conn| {
-            storlite::metadata::with_write_tx(conn, |tx| {
-                storlite::metadata::queries::set_bucket_quota(tx, "docs", Some(10))
+            litebucket::metadata::with_write_tx(conn, |tx| {
+                litebucket::metadata::queries::set_bucket_quota(tx, "docs", Some(10))
             })
         })
         .await
@@ -697,16 +699,22 @@ async fn mpu_08_expiry_and_abort_release_parts() {
     // An upload with in-flight work is skipped.
     {
         let _busy = store.upload_activity(&id);
-        assert_eq!(storlite::maintenance::expire_once(&store).await.unwrap(), 0);
+        assert_eq!(
+            litebucket::maintenance::expire_once(&store).await.unwrap(),
+            0
+        );
     }
-    assert_eq!(storlite::maintenance::expire_once(&store).await.unwrap(), 1);
+    assert_eq!(
+        litebucket::maintenance::expire_once(&store).await.unwrap(),
+        1
+    );
     assert_eq!(
         part(&c, "old", &id, 2, b"x", &[]).await.code(),
         "NoSuchUpload"
     );
     assert_eq!(store.capacity.part_bytes(), 1000);
     // Parts of expired/aborted uploads are reclaimed by GC; active ones stay.
-    while storlite::maintenance::gc_once(&store).await.unwrap() > 0 {}
+    while litebucket::maintenance::gc_once(&store).await.unwrap() > 0 {}
     assert_eq!(files_under(&s.data_dir().join("multipart")).len(), 1);
     c.send(
         "DELETE",
@@ -716,11 +724,11 @@ async fn mpu_08_expiry_and_abort_release_parts() {
         Payload::Signed(vec![]),
     )
     .await;
-    while storlite::maintenance::gc_once(&store).await.unwrap() > 0 {}
+    while litebucket::maintenance::gc_once(&store).await.unwrap() > 0 {}
     assert!(files_under(&s.data_dir().join("multipart")).is_empty());
     assert_eq!(store.capacity.part_bytes(), 0);
     // Expired receipts are removed.
-    storlite::maintenance::expire_once(&store).await.unwrap();
+    litebucket::maintenance::expire_once(&store).await.unwrap();
     let n: i64 = store
         .db
         .read(

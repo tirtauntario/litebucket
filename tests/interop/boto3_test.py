@@ -1,5 +1,5 @@
 """SDK-02 (Boto3): default checksums, metadata, listing, presign, forced
-multipart transfers against a local storlite. Run via scripts/interop.sh."""
+multipart transfers against a local litebucket. Run via scripts/interop.sh."""
 
 import hashlib
 import os
@@ -13,8 +13,8 @@ import botocore
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 
-ENDPOINT = os.environ["STORLITE_ENDPOINT"]
-CA = os.environ.get("STORLITE_CA_BUNDLE")
+ENDPOINT = os.environ["LITEBUCKET_ENDPOINT"]
+CA = os.environ.get("LITEBUCKET_CA_BUNDLE")
 if not (ENDPOINT.startswith("http://127.0.0.1:") or ENDPOINT.startswith("https://127.0.0.1:")):
     raise SystemExit(f"refusing non-local endpoint {ENDPOINT}")
 
@@ -23,9 +23,9 @@ def client():
     return boto3.client(
         "s3",
         endpoint_url=ENDPOINT,
-        region_name=os.environ["STORLITE_REGION"],
-        aws_access_key_id=os.environ["STORLITE_KEY_ID"],
-        aws_secret_access_key=os.environ["STORLITE_SECRET"],
+        region_name=os.environ["LITEBUCKET_REGION"],
+        aws_access_key_id=os.environ["LITEBUCKET_KEY_ID"],
+        aws_secret_access_key=os.environ["LITEBUCKET_SECRET"],
         verify=CA if CA else None,
         # SigV4 is required; botocore's legacy presigner default would use SigV2.
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, retries={"max_attempts": 2}),

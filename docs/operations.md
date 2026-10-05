@@ -1,8 +1,8 @@
-# storlite operations guide
+# litebucket operations guide
 
 ## Deployment model
 
-- One `storlite` process per data directory, on one host, on a **local**
+- One `litebucket` process per data directory, on one host, on a **local**
   filesystem (validated: APFS on macOS for development; ext4 on Linux for the
   authoritative test run). NFS/SMB/shared multi-host volumes are unsupported.
 - The data directory holds everything: `store.lock`, `metadata.sqlite3`
@@ -18,15 +18,15 @@
 
 ## Configuration
 
-`storlite config template` prints a commented file listing every setting
+`litebucket config template` prints a commented file listing every setting
 with its default (`--docker` for the container layout; sources:
 `docs/examples/config.example.toml`, `deploy/config.toml`). Unknown keys are
 errors. Relative paths resolve against the config file's directory. Byte
 values are integers (`_bytes`), durations carry units (`_seconds`, `_ms`).
 
 Precedence: built-in defaults < config file < environment
-(`STORLITE_HTTP_LISTEN`, `STORLITE_MANAGEMENT_LISTEN`, `STORLITE_LOG_LEVEL`,
-`STORLITE_LOG_FORMAT`) < CLI flags (`serve --listen`, `--management-listen`,
+(`LITEBUCKET_HTTP_LISTEN`, `LITEBUCKET_MANAGEMENT_LISTEN`, `LITEBUCKET_LOG_LEVEL`,
+`LITEBUCKET_LOG_FORMAT`) < CLI flags (`serve --listen`, `--management-listen`,
 `--log-level`). Secrets never come from flags.
 
 Transport rules enforced at startup:
@@ -39,7 +39,7 @@ Transport rules enforced at startup:
 - Loopback plaintext requires `allow_insecure_loopback_http = true`.
 - TLS: set both `tls_certificate_file` and `tls_private_key_file` (PEM).
 
-`storlite config check --config config.toml` validates without starting.
+`litebucket config check --config config.toml` validates without starting.
 
 ## Access keys and the admin API
 
@@ -48,7 +48,7 @@ metadata database (`credentials`, `credential_grants`,
 `credential_global_grants`, `buckets`; every change is recorded in
 `admin_audit`). They are managed through the admin API while the server runs.
 See [installation.md](installation.md#managing-access-keys-and-buckets) for the
-`storlite admin` commands.
+`litebucket admin` commands.
 
 **Secret storage.** SigV4 needs the raw secret, so secrets cannot be hashed.
 With `[secrets] protection = "encrypted"` (default) each secret is sealed with
@@ -56,18 +56,18 @@ AES-256-GCM under the 32-byte master key in `master_key_file` (base64, one
 line, mode 0600/0400, outside `data_dir`). The associated data binds each
 ciphertext to the store id and access key id, so a sealed value cannot be
 moved to another key or store. With `protection = "plaintext"` secrets are
-stored as-is. At startup, storlite converts every stored secret to the
+stored as-is. At startup, litebucket converts every stored secret to the
 configured mode in one transaction; it refuses to start when any secret
 cannot be read (missing or wrong master key, altered record) and changes
 nothing in that case.
 
 **Admin socket.** `[admin] socket` (default `./admin.sock` next to the config;
-`/run/storlite/admin.sock` in the Docker and systemd setups). The server
+`/run/litebucket/admin.sock` in the Docker and systemd setups). The server
 replaces a stale socket left by a crash, refuses a socket another process is
 serving, sets mode 0600, removes it at shutdown, and serves only peers whose
 effective uid (from the socket's peer credentials) is its own or root.
 
-**Admin API** (JSON over HTTP/1.1 on the socket; used by `storlite admin`):
+**Admin API** (JSON over HTTP/1.1 on the socket; used by `litebucket admin`):
 
 | Method and path | Purpose |
 |---|---|
@@ -103,7 +103,7 @@ minute.
 `list_buckets`, `create_bucket`, `admin`. The service refuses to start
 without at least one enabled access key.
 
-**Recovery:** `storlite admin recover` (server stopped; it takes the store
+**Recovery:** `litebucket admin recover` (server stopped; it takes the store
 lock) adds a new admin key directly in the database. It first checks that
 the configured master key opens every stored secret, so keys sealed under
 different master keys are never mixed; `--reset-keys` deletes all keys first
@@ -112,17 +112,17 @@ different master keys are never mixed; `--reset-keys` deletes all keys first
 ## Lifecycle commands
 
 ```sh
-storlite init  --config config.toml     # new store + master key (if missing) + first admin key
-storlite serve --config config.toml
-storlite healthcheck --url http://127.0.0.1:9001/readyz
-storlite doctor --config config.toml           # offline, read-only report
-storlite check  --config config.toml --full    # + hash every referenced file, report untracked files
-storlite gc     --config config.toml --dry-run # default
-storlite gc     --config config.toml --apply   # recovery + delete eligible tracked garbage
-storlite admin  --config config.toml recover   # offline: new admin key (--reset-keys: drop all keys first)
-storlite master-key generate --output ./master.key
-storlite backup  --config config.toml --destination /backup/snapshot-001
-storlite restore --source /backup/snapshot-001 --data-dir /srv/storlite-restored --master-key-file ./master.key
+litebucket init  --config config.toml     # new store + master key (if missing) + first admin key
+litebucket serve --config config.toml
+litebucket healthcheck --url http://127.0.0.1:9001/readyz
+litebucket doctor --config config.toml           # offline, read-only report
+litebucket check  --config config.toml --full    # + hash every referenced file, report untracked files
+litebucket gc     --config config.toml --dry-run # default
+litebucket gc     --config config.toml --apply   # recovery + delete eligible tracked garbage
+litebucket admin  --config config.toml recover   # offline: new admin key (--reset-keys: drop all keys first)
+litebucket master-key generate --output ./master.key
+litebucket backup  --config config.toml --destination /backup/snapshot-001
+litebucket restore --source /backup/snapshot-001 --data-dir /srv/litebucket-restored --master-key-file ./master.key
 ```
 
 Offline commands take the same exclusive lock; stop the server first.
@@ -159,11 +159,11 @@ before starting a new one; rolling overlap with two writers is unsupported.
 
 | Signal | Meaning | Operator action |
 |---|---|---|
-| `readyz` `halted` / writes return 503 | An fsync/publication `EIO` or an unreconciled commit outcome. Reads continue; GC pauses. | Inspect logs (`event=mutations_halted`), check the disk, restart (recovery runs at startup), then `storlite check --full`. |
-| `readyz` `integrity_failure`, GET returns 500 `InternalError` | A referenced file is missing/short/corrupt. Metadata is never deleted automatically. | `storlite check --full` to enumerate; restore affected objects from backup. |
-| `QuotaExceeded` (403) | Bucket logical quota reached. Reads/deletes still work. | Raise with `storlite admin bucket set-quota`. |
-| Startup: "cannot decrypt the secret of access key …" | Wrong or replaced master key, or an altered key record. Nothing was changed. | Restore the right `master_key_file`; if it is lost, `storlite admin recover --reset-keys`. |
-| Startup: "no enabled access keys" | Every key was deleted or disabled offline. | `storlite admin recover` (server stopped). |
+| `readyz` `halted` / writes return 503 | An fsync/publication `EIO` or an unreconciled commit outcome. Reads continue; GC pauses. | Inspect logs (`event=mutations_halted`), check the disk, restart (recovery runs at startup), then `litebucket check --full`. |
+| `readyz` `integrity_failure`, GET returns 500 `InternalError` | A referenced file is missing/short/corrupt. Metadata is never deleted automatically. | `litebucket check --full` to enumerate; restore affected objects from backup. |
+| `QuotaExceeded` (403) | Bucket logical quota reached. Reads/deletes still work. | Raise with `litebucket admin bucket set-quota`. |
+| Startup: "cannot decrypt the secret of access key …" | Wrong or replaced master key, or an altered key record. Nothing was changed. | Restore the right `master_key_file`; if it is lost, `litebucket admin recover --reset-keys`. |
+| Startup: "no enabled access keys" | Every key was deleted or disabled offline. | `litebucket admin recover` (server stopped). |
 | 503 `ServiceUnavailable` "storage capacity" | Free space/inodes below reserve (max(`min_disk_free_bytes`, `min_disk_free_percent`)) or temporary-space cap. | Free space; reads, deletes, and aborts remain available. |
 | 503 `SlowDown` | Permit or metadata-queue wait exceeded. | Client retries; tune limits if sustained. |
 | Untracked files reported | Manual intervention or a collision. Never auto-deleted. | Investigate; remove manually only when certain. |
@@ -212,8 +212,8 @@ stop → `backup` → install new binary → `doctor` (reports pending migration
 Installation, Docker Compose, systemd and TLS setup are covered in
 [installation.md](installation.md). Container specifics:
 
-- Image: `ghcr.io/tirtauntario/storlite` (`linux/amd64`, `linux/arm64`), or
-  build it with `docker build -f deploy/Dockerfile -t storlite:local .`.
+- Image: `ghcr.io/tirtauntario/litebucket` (`linux/amd64`, `linux/arm64`), or
+  build it with `docker build -f deploy/Dockerfile -t litebucket:local .`.
 - It runs as non-root uid/gid 65532 (distroless `nonroot`) and has one
   writable volume (`/data`, mode 0700). The compose example uses a read-only
   root filesystem. There is no shell, build toolchain, SQLite CLI or database

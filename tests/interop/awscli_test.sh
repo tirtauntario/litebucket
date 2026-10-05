@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SDK-01 (AWS CLI v2): default-checksum ordinary and forced-multipart flows
-# against a local storlite only. Run via scripts/interop.sh.
+# against a local litebucket only. Run via scripts/interop.sh.
 set -euo pipefail
-case "$STORLITE_ENDPOINT" in http://127.0.0.1:*|https://127.0.0.1:*) ;; *) echo "refusing non-local endpoint"; exit 1 ;; esac
+case "$LITEBUCKET_ENDPOINT" in http://127.0.0.1:*|https://127.0.0.1:*) ;; *) echo "refusing non-local endpoint"; exit 1 ;; esac
 
 W="$INTEROP_WORK/awscli"; mkdir -p "$W"
 export AWS_CONFIG_FILE="$W/config" AWS_SHARED_CREDENTIALS_FILE="$W/credentials"
 cat > "$AWS_CONFIG_FILE" <<CFG
 [default]
-region = $STORLITE_REGION
+region = $LITEBUCKET_REGION
 s3 =
   addressing_style = path
   multipart_threshold = 5MB
@@ -16,12 +16,12 @@ s3 =
 CFG
 cat > "$AWS_SHARED_CREDENTIALS_FILE" <<CRED
 [default]
-aws_access_key_id = $STORLITE_KEY_ID
-aws_secret_access_key = $STORLITE_SECRET
+aws_access_key_id = $LITEBUCKET_KEY_ID
+aws_secret_access_key = $LITEBUCKET_SECRET
 CRED
-CA_ARGS=(); [ -n "${STORLITE_CA_BUNDLE:-}" ] && CA_ARGS=(--ca-bundle "$STORLITE_CA_BUNDLE")
-CURL_CA=(); [ -n "${STORLITE_CA_BUNDLE:-}" ] && CURL_CA=(--cacert "$STORLITE_CA_BUNDLE")
-aws() { command aws --endpoint-url "$STORLITE_ENDPOINT" ${CA_ARGS[@]+"${CA_ARGS[@]}"} "$@"; }
+CA_ARGS=(); [ -n "${LITEBUCKET_CA_BUNDLE:-}" ] && CA_ARGS=(--ca-bundle "$LITEBUCKET_CA_BUNDLE")
+CURL_CA=(); [ -n "${LITEBUCKET_CA_BUNDLE:-}" ] && CURL_CA=(--cacert "$LITEBUCKET_CA_BUNDLE")
+aws() { command aws --endpoint-url "$LITEBUCKET_ENDPOINT" ${CA_ARGS[@]+"${CA_ARGS[@]}"} "$@"; }
 pass=0; fail=0
 check() { if eval "$2"; then echo "ok   $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
 

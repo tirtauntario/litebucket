@@ -7,20 +7,20 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src src
 COPY migrations migrations
-# Configuration templates embedded by `storlite config template`.
+# Configuration templates embedded by `litebucket config template`.
 COPY docs/examples/config.example.toml docs/examples/
 COPY deploy/config.toml deploy/
 RUN cargo build --release --locked \
  && install -d -m 0700 /out/data
 
 FROM gcr.io/distroless/cc-debian13:nonroot
-COPY --from=build /src/target/release/storlite /usr/local/bin/storlite
+COPY --from=build /src/target/release/litebucket /usr/local/bin/litebucket
 COPY --from=build --chown=65532:65532 /out/data /data
 USER 65532:65532
-# Lets `docker compose exec storlite storlite admin ...` find the config.
-ENV STORLITE_CONFIG=/etc/storlite/config.toml
+# Lets `docker compose exec litebucket litebucket admin ...` find the config.
+ENV LITEBUCKET_CONFIG=/etc/litebucket/config.toml
 VOLUME ["/data"]
 EXPOSE 9000
-HEALTHCHECK --interval=30s --timeout=5s CMD ["/usr/local/bin/storlite", "healthcheck", "--url", "http://127.0.0.1:9001/readyz"]
-ENTRYPOINT ["/usr/local/bin/storlite"]
+HEALTHCHECK --interval=30s --timeout=5s CMD ["/usr/local/bin/litebucket", "healthcheck", "--url", "http://127.0.0.1:9001/readyz"]
+ENTRYPOINT ["/usr/local/bin/litebucket"]
 CMD ["serve"]

@@ -7,7 +7,7 @@ mod common;
 use common::*;
 use serde_json::{Value, json};
 
-const BIN: &str = env!("CARGO_BIN_EXE_storlite");
+const BIN: &str = env!("CARGO_BIN_EXE_litebucket");
 
 async fn setup() -> (TestServer, Client) {
     let s = TestServer::start().await;
@@ -376,7 +376,7 @@ async fn protection_modes_convert_at_startup() {
         "plaintext mode stores the secret as-is"
     );
     let cfg = load_config(&s.config_path);
-    assert!(storlite::doctor::doctor(&cfg, false).unwrap());
+    assert!(litebucket::doctor::doctor(&cfg, false).unwrap());
 
     set_protection(&s, "encrypted");
     // Encrypt under a new key, then put the old key back: startup refuses
@@ -384,19 +384,19 @@ async fn protection_modes_convert_at_startup() {
     let key = s.dir.path().join("master.key");
     let saved = std::fs::read(&key).unwrap();
     std::fs::remove_file(&key).unwrap();
-    storlite::secrets::MasterKey::generate(&key).unwrap();
+    litebucket::secrets::MasterKey::generate(&key).unwrap();
     s.boot().await;
     s.stop().await;
     std::fs::remove_file(&key).unwrap();
     std::fs::write(&key, &saved).unwrap();
     std::fs::set_permissions(&key, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
-    let err = storlite::store::Store::open(load_config(&s.config_path))
+    let err = litebucket::store::Store::open(load_config(&s.config_path))
         .unwrap_err()
         .to_string();
     assert!(err.contains("wrong master key"), "{err}");
     let cfg = load_config(&s.config_path);
     assert!(
-        !storlite::doctor::doctor(&cfg, false).unwrap(),
+        !litebucket::doctor::doctor(&cfg, false).unwrap(),
         "doctor reports it"
     );
 }
@@ -410,7 +410,7 @@ async fn offline_recover_creates_and_resets_admin_keys() {
     // Lost master key: recovery without --reset-keys refuses.
     let key = s.dir.path().join("master.key");
     std::fs::remove_file(&key).unwrap();
-    storlite::secrets::MasterKey::generate(&key).unwrap();
+    litebucket::secrets::MasterKey::generate(&key).unwrap();
     let out = std::process::Command::new(BIN)
         .args(["admin", "recover", "--config"])
         .arg(&cfg)

@@ -106,21 +106,23 @@ impl Metrics {
     /// Prometheus text exposition. `gauges` are (name, help, value) samples.
     pub fn render(&self, gauges: &[(&str, &str, f64)]) -> String {
         let mut out = String::new();
-        out.push_str("# HELP storlite_requests_total S3 requests by operation and status class.\n");
-        out.push_str("# TYPE storlite_requests_total counter\n");
+        out.push_str(
+            "# HELP litebucket_requests_total S3 requests by operation and status class.\n",
+        );
+        out.push_str("# TYPE litebucket_requests_total counter\n");
         for (i, op) in OPERATIONS.iter().enumerate() {
             for (c, class) in STATUS_CLASSES.iter().enumerate() {
                 let v = self.ops[i].status[c].load(Ordering::Relaxed);
                 if v > 0 {
                     let _ = writeln!(
                         out,
-                        "storlite_requests_total{{operation=\"{op}\",status=\"{class}\"}} {v}"
+                        "litebucket_requests_total{{operation=\"{op}\",status=\"{class}\"}} {v}"
                     );
                 }
             }
         }
-        out.push_str("# HELP storlite_request_duration_seconds S3 request latency.\n");
-        out.push_str("# TYPE storlite_request_duration_seconds histogram\n");
+        out.push_str("# HELP litebucket_request_duration_seconds S3 request latency.\n");
+        out.push_str("# TYPE litebucket_request_duration_seconds histogram\n");
         for (i, op) in OPERATIONS.iter().enumerate() {
             let m = &self.ops[i];
             let count = m.latency_count.load(Ordering::Relaxed);
@@ -130,73 +132,73 @@ impl Metrics {
             for (b, le) in LATENCY_BUCKETS_MS.iter().enumerate() {
                 let _ = writeln!(
                     out,
-                    "storlite_request_duration_seconds_bucket{{operation=\"{op}\",le=\"{}\"}} {}",
+                    "litebucket_request_duration_seconds_bucket{{operation=\"{op}\",le=\"{}\"}} {}",
                     *le as f64 / 1000.0,
                     m.latency_buckets[b].load(Ordering::Relaxed)
                 );
             }
             let _ = writeln!(
                 out,
-                "storlite_request_duration_seconds_bucket{{operation=\"{op}\",le=\"+Inf\"}} {count}"
+                "litebucket_request_duration_seconds_bucket{{operation=\"{op}\",le=\"+Inf\"}} {count}"
             );
             let _ = writeln!(
                 out,
-                "storlite_request_duration_seconds_sum{{operation=\"{op}\"}} {}",
+                "litebucket_request_duration_seconds_sum{{operation=\"{op}\"}} {}",
                 m.latency_sum_us.load(Ordering::Relaxed) as f64 / 1e6
             );
             let _ = writeln!(
                 out,
-                "storlite_request_duration_seconds_count{{operation=\"{op}\"}} {count}"
+                "litebucket_request_duration_seconds_count{{operation=\"{op}\"}} {count}"
             );
         }
         let counters: [(&str, &str, &AtomicU64); 10] = [
             (
-                "storlite_bytes_received_total",
+                "litebucket_bytes_received_total",
                 "Decoded object bytes received.",
                 &self.bytes_received,
             ),
             (
-                "storlite_bytes_sent_total",
+                "litebucket_bytes_sent_total",
                 "Object bytes sent.",
                 &self.bytes_sent,
             ),
             (
-                "storlite_integrity_errors_total",
+                "litebucket_integrity_errors_total",
                 "Storage integrity faults detected.",
                 &self.integrity_errors,
             ),
             (
-                "storlite_recovery_actions_total",
+                "litebucket_recovery_actions_total",
                 "Recovery actions taken.",
                 &self.recovery_actions,
             ),
             (
-                "storlite_gc_deleted_blobs_total",
+                "litebucket_gc_deleted_blobs_total",
                 "Garbage files reclaimed.",
                 &self.gc_deleted_blobs,
             ),
             (
-                "storlite_gc_deleted_bytes_total",
+                "litebucket_gc_deleted_bytes_total",
                 "Garbage bytes reclaimed.",
                 &self.gc_deleted_bytes,
             ),
             (
-                "storlite_multipart_expired_total",
+                "litebucket_multipart_expired_total",
                 "Inactive multipart uploads expired.",
                 &self.multipart_expired,
             ),
             (
-                "storlite_multipart_aborted_total",
+                "litebucket_multipart_aborted_total",
                 "Multipart uploads aborted by clients.",
                 &self.multipart_aborted,
             ),
             (
-                "storlite_sqlite_checkpoints_total",
+                "litebucket_sqlite_checkpoints_total",
                 "Passive WAL checkpoints run.",
                 &self.checkpoints,
             ),
             (
-                "storlite_sqlite_wal_bytes",
+                "litebucket_sqlite_wal_bytes",
                 "WAL file size at last checkpoint.",
                 &self.wal_bytes,
             ),
@@ -248,9 +250,11 @@ mod tests {
         let m = Metrics::default();
         m.observe("PutObject", 200, std::time::Duration::from_millis(3));
         m.observe("no-such-op", 500, std::time::Duration::from_millis(3));
-        let text = m.render(&[("storlite_active_uploads", "Active uploads.", 2.0)]);
-        assert!(text.contains("storlite_requests_total{operation=\"PutObject\",status=\"2xx\"} 1"));
-        assert!(text.contains("storlite_requests_total{operation=\"Unknown\",status=\"5xx\"} 1"));
-        assert!(text.contains("storlite_active_uploads 2"));
+        let text = m.render(&[("litebucket_active_uploads", "Active uploads.", 2.0)]);
+        assert!(
+            text.contains("litebucket_requests_total{operation=\"PutObject\",status=\"2xx\"} 1")
+        );
+        assert!(text.contains("litebucket_requests_total{operation=\"Unknown\",status=\"5xx\"} 1"));
+        assert!(text.contains("litebucket_active_uploads 2"));
     }
 }

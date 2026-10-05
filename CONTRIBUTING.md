@@ -1,4 +1,4 @@
-# Contributing to storlite
+# Contributing to litebucket
 
 Bug reports, compatibility reports and pull requests are welcome. Report
 security issues privately (see [SECURITY.md](SECURITY.md)), not in public
@@ -6,7 +6,7 @@ issues.
 
 ## Before you start
 
-storlite is deliberately small. [docs/SPEC.md](docs/SPEC.md) is the contract,
+litebucket is deliberately small. [docs/SPEC.md](docs/SPEC.md) is the contract,
 and its invariants (INV-01..INV-14) are mandatory. For anything beyond a bug
 fix, such as a new S3 operation, a new config key or a storage-format change,
 open an issue first to agree on scope. Unsupported S3 features are rejected

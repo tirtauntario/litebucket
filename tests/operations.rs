@@ -7,8 +7,8 @@ use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
 use common::*;
-use storlite::capacity::PermitKind;
-use storlite::metadata::queries;
+use litebucket::capacity::PermitKind;
+use litebucket::metadata::queries;
 
 async fn setup_with(extra: &str) -> (TestServer, Client) {
     let s = TestServer::start_with(extra).await;
@@ -23,12 +23,12 @@ async fn ops_01_second_owner_is_refused_and_lock_is_kept() {
     let cfg = load_config(&s.config_path);
     let lock = s.data_dir().join("store.lock");
     let ino = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&lock).unwrap());
-    let err = storlite::store::open_offline(&cfg, false).unwrap_err();
-    assert!(matches!(err, storlite::error::Error::Locked), "{err}");
-    assert!(storlite::store::Store::open(cfg.clone()).is_err());
-    assert!(storlite::doctor::gc(&cfg, true).is_err());
+    let err = litebucket::store::open_offline(&cfg, false).unwrap_err();
+    assert!(matches!(err, litebucket::error::Error::Locked), "{err}");
+    assert!(litebucket::store::Store::open(cfg.clone()).is_err());
+    assert!(litebucket::doctor::gc(&cfg, true).is_err());
     assert!(
-        storlite::store::initialize(&cfg).is_err(),
+        litebucket::store::initialize(&cfg).is_err(),
         "init refuses a non-empty directory"
     );
     let ino2 = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&lock).unwrap());
@@ -51,7 +51,7 @@ async fn ops_04_gc_reclaims_only_tracked_eligible_garbage() {
     std::fs::write(&stray, b"unknown").unwrap();
     let before = files_under(&s.data_dir().join("objects")).len();
     assert_eq!(before, 5);
-    while storlite::maintenance::gc_once(&store).await.unwrap() > 0 {}
+    while litebucket::maintenance::gc_once(&store).await.unwrap() > 0 {}
     let after = files_under(&s.data_dir().join("objects")).len();
     assert_eq!(
         after, 3,
@@ -70,7 +70,7 @@ async fn ops_04_gc_reclaims_only_tracked_eligible_garbage() {
     c2.put("/docs/a", b"1").await;
     c2.put("/docs/a", b"2").await;
     assert_eq!(
-        storlite::maintenance::gc_once(&s2.store()).await.unwrap(),
+        litebucket::maintenance::gc_once(&s2.store()).await.unwrap(),
         0
     );
     assert_eq!(files_under(&s2.data_dir().join("objects")).len(), 2);
@@ -162,7 +162,7 @@ async fn ops_05_backup_and_restore_round_trip() {
     s.stop().await;
 
     let backup_dir = s.dir.path().join("backup-1");
-    storlite::backup::backup(&cfg, &backup_dir).unwrap();
+    litebucket::backup::backup(&cfg, &backup_dir).unwrap();
     assert!(backup_dir.join("BACKUP_COMPLETE").exists());
     assert!(!backup_dir.join("BACKUP_INCOMPLETE").exists());
     let mode = std::os::unix::fs::PermissionsExt::mode(
@@ -170,18 +170,18 @@ async fn ops_05_backup_and_restore_round_trip() {
     );
     assert_eq!(mode & 0o777, 0o700);
     // Backing up into an existing directory is refused.
-    assert!(storlite::backup::backup(&cfg, &backup_dir).is_err());
+    assert!(litebucket::backup::backup(&cfg, &backup_dir).is_err());
 
     // Restore into a different empty directory and serve from it.
     let restored = s.dir.path().join("restored");
     let key = s.dir.path().join("master.key");
     // Encrypted access keys need the master key to be verified.
     assert!(
-        storlite::backup::restore(&backup_dir, &s.dir.path().join("nokey"), None, false).is_err()
+        litebucket::backup::restore(&backup_dir, &s.dir.path().join("nokey"), None, false).is_err()
     );
     let other_key = s.dir.path().join("other.key");
-    storlite::secrets::MasterKey::generate(&other_key).unwrap();
-    let err = storlite::backup::restore(
+    litebucket::secrets::MasterKey::generate(&other_key).unwrap();
+    let err = litebucket::backup::restore(
         &backup_dir,
         &s.dir.path().join("wrongkey"),
         Some(&other_key),
@@ -194,9 +194,9 @@ async fn ops_05_backup_and_restore_round_trip() {
         !s.dir.path().join("wrongkey").exists(),
         "nothing written before the key check"
     );
-    storlite::backup::restore(&backup_dir, &restored, Some(&key), false).unwrap();
+    litebucket::backup::restore(&backup_dir, &restored, Some(&key), false).unwrap();
     assert!(
-        storlite::backup::restore(&backup_dir, &restored, Some(&key), false).is_err(),
+        litebucket::backup::restore(&backup_dir, &restored, Some(&key), false).is_err(),
         "non-empty target refused"
     );
     let text = std::fs::read_to_string(&s.config_path)
@@ -255,7 +255,7 @@ async fn ops_05_backup_and_restore_round_trip() {
     bytes[0] ^= 0xff;
     std::fs::write(&victim, bytes).unwrap();
     assert!(
-        storlite::backup::restore(
+        litebucket::backup::restore(
             &backup_dir,
             &s.dir.path().join("restored2"),
             Some(&key),
@@ -266,7 +266,7 @@ async fn ops_05_backup_and_restore_round_trip() {
     // An incomplete backup is refused.
     std::fs::remove_file(backup_dir.join("BACKUP_COMPLETE")).unwrap();
     assert!(
-        storlite::backup::restore(
+        litebucket::backup::restore(
             &backup_dir,
             &s.dir.path().join("restored3"),
             Some(&key),
@@ -282,18 +282,18 @@ async fn doctor_reports_consistency_and_untracked_files() {
     c.put("/docs/a", b"a").await;
     let cfg = load_config(&s.config_path);
     s.stop().await;
-    assert!(storlite::doctor::doctor(&cfg, true).unwrap());
+    assert!(litebucket::doctor::doctor(&cfg, true).unwrap());
     std::fs::create_dir_all(s.data_dir().join("staging/00/11")).unwrap();
     std::fs::write(s.data_dir().join("staging/00/11/junk.tmp"), b"j").unwrap();
     assert!(
-        !storlite::doctor::doctor(&cfg, true).unwrap(),
+        !litebucket::doctor::doctor(&cfg, true).unwrap(),
         "untracked file reported"
     );
     assert!(
         s.data_dir().join("staging/00/11/junk.tmp").exists(),
         "doctor never deletes"
     );
-    storlite::doctor::gc(&cfg, true).unwrap();
+    litebucket::doctor::gc(&cfg, true).unwrap();
     assert!(
         s.data_dir().join("staging/00/11/junk.tmp").exists(),
         "gc never deletes untracked files"
@@ -453,7 +453,7 @@ async fn cap_01_get_03_overload_and_abandoned_downloads_are_bounded() {
     got.extend_from_slice(&buf[..n]);
     tokio::time::sleep(Duration::from_millis(50)).await;
     let _ = c.delete("/docs/big").await;
-    while storlite::maintenance::gc_once(&store).await.unwrap() > 0 {}
+    while litebucket::maintenance::gc_once(&store).await.unwrap() > 0 {}
     reader.read_to_end(&mut got).unwrap();
     let body_start = got.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
     assert_eq!(got.len() - body_start, 8 * 1024 * 1024);
@@ -467,7 +467,7 @@ async fn graceful_shutdown_drains_and_releases_lock() {
     s.stop().await;
     let cfg = load_config(&s.config_path);
     // Lock released after shutdown: offline commands can run.
-    let (_d, _conn, _m, _) = storlite::store::open_offline(&cfg, false).unwrap();
+    let (_d, _conn, _m, _) = litebucket::store::open_offline(&cfg, false).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -516,7 +516,7 @@ async fn db_04_missing_or_newer_metadata_never_opens_an_empty_store() {
         )
         .unwrap();
     }
-    assert!(storlite::store::Store::open(cfg.clone()).is_err());
+    assert!(litebucket::store::Store::open(cfg.clone()).is_err());
     {
         let conn = rusqlite::Connection::open(s.data_dir().join("metadata.sqlite3")).unwrap();
         conn.execute("DELETE FROM schema_migrations WHERE version = 999", [])
@@ -528,7 +528,7 @@ async fn db_04_missing_or_newer_metadata_never_opens_an_empty_store() {
     std::fs::rename(&db, &moved).unwrap();
     let _ = std::fs::remove_file(s.data_dir().join("metadata.sqlite3-wal"));
     let _ = std::fs::remove_file(s.data_dir().join("metadata.sqlite3-shm"));
-    let err = storlite::store::Store::open(cfg.clone())
+    let err = litebucket::store::Store::open(cfg.clone())
         .unwrap_err()
         .to_string();
     assert!(err.contains("refusing to create an empty store"), "{err}");

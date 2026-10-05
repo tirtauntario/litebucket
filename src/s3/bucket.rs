@@ -90,7 +90,7 @@ fn list_buckets_xml(
     w.root("ListAllMyBucketsResult")
         .open("Owner")
         .elem("ID", &cx.store.meta.owner_id)
-        .elem("DisplayName", "storlite")
+        .elem("DisplayName", "litebucket")
         .close("Owner")
         .open("Buckets");
     for b in buckets {

@@ -280,16 +280,16 @@ pub struct Overrides {
     pub log_level: Option<String>,
 }
 
-/// Commented configuration templates printed by `storlite config template`.
+/// Commented configuration templates printed by `litebucket config template`.
 pub const TEMPLATE_STANDALONE: &str = include_str!("../docs/examples/config.example.toml");
 pub const TEMPLATE_DOCKER: &str = include_str!("../deploy/config.toml");
 
 /// Documented non-secret environment overrides.
 pub const ENV_OVERRIDES: &[&str] = &[
-    "STORLITE_HTTP_LISTEN",
-    "STORLITE_MANAGEMENT_LISTEN",
-    "STORLITE_LOG_LEVEL",
-    "STORLITE_LOG_FORMAT",
+    "LITEBUCKET_HTTP_LISTEN",
+    "LITEBUCKET_MANAGEMENT_LISTEN",
+    "LITEBUCKET_LOG_LEVEL",
+    "LITEBUCKET_LOG_FORMAT",
 ];
 
 impl Config {
@@ -322,16 +322,16 @@ impl Config {
     }
 
     pub fn apply_env(&mut self, get: impl Fn(&str) -> Option<String>) {
-        if let Some(v) = get("STORLITE_HTTP_LISTEN") {
+        if let Some(v) = get("LITEBUCKET_HTTP_LISTEN") {
             self.http.listen = v;
         }
-        if let Some(v) = get("STORLITE_MANAGEMENT_LISTEN") {
+        if let Some(v) = get("LITEBUCKET_MANAGEMENT_LISTEN") {
             self.management.listen = v;
         }
-        if let Some(v) = get("STORLITE_LOG_LEVEL") {
+        if let Some(v) = get("LITEBUCKET_LOG_LEVEL") {
             self.logging.level = v;
         }
-        if let Some(v) = get("STORLITE_LOG_FORMAT") {
+        if let Some(v) = get("LITEBUCKET_LOG_FORMAT") {
             self.logging.format = v;
         }
     }
@@ -739,7 +739,7 @@ mod tests {
 
     fn example() -> Config {
         let mut c = Config::parse(EXAMPLE).unwrap();
-        c.base_dir = PathBuf::from("/srv/storlite");
+        c.base_dir = PathBuf::from("/srv/litebucket");
         c.resolve_paths();
         c
     }
@@ -748,7 +748,7 @@ mod tests {
     fn example_config_parses_and_validates() {
         let c = example();
         c.validate().unwrap();
-        assert_eq!(c.data_dir, PathBuf::from("/srv/storlite/data"));
+        assert_eq!(c.data_dir, PathBuf::from("/srv/litebucket/data"));
         assert_eq!(c.limits.max_object_bytes, 100 * GIB);
         assert_eq!(c.multipart.receipt_retention_seconds, 86_400);
     }
@@ -798,7 +798,7 @@ mod tests {
     #[test]
     fn env_and_cli_override_precedence() {
         let mut c = example();
-        c.apply_env(|k| (k == "STORLITE_HTTP_LISTEN").then(|| "127.0.0.1:9100".to_string()));
+        c.apply_env(|k| (k == "LITEBUCKET_HTTP_LISTEN").then(|| "127.0.0.1:9100".to_string()));
         assert_eq!(c.http.listen, "127.0.0.1:9100");
         c.apply_overrides(&Overrides {
             listen: Some("127.0.0.1:9200".into()),
@@ -831,7 +831,7 @@ mod tests {
             ("docker", TEMPLATE_DOCKER),
         ] {
             let mut c = Config::parse(text).unwrap_or_else(|e| panic!("{name}: {e}"));
-            c.base_dir = PathBuf::from("/srv/storlite");
+            c.base_dir = PathBuf::from("/srv/litebucket");
             c.resolve_paths();
             c.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
 

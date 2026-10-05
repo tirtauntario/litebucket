@@ -1,11 +1,11 @@
-# storlite configuration for Docker.
+# litebucket configuration for Docker.
 #
-# Generate this file with `storlite config template --docker > config.toml`.
+# Generate this file with `litebucket config template --docker > config.toml`.
 # Lines starting with "# key = value" show the built-in default. To change a
 # setting, remove the leading "# " and edit the value. Unknown keys are errors.
 # Check your edits, then restart:
-#   docker compose run --rm storlite config check --config /etc/storlite/config.toml
-#   docker compose restart storlite
+#   docker compose run --rm litebucket config check --config /etc/litebucket/config.toml
+#   docker compose restart litebucket
 #
 # Units: *_bytes are plain integers (1 GiB = 1073741824); durations carry
 # their unit in the name (*_seconds, *_ms).
@@ -25,13 +25,13 @@ region = "us-east-1"
 # mode converts all stored secrets at the next start; switching to plaintext
 # needs the master key one last time.
 # protection = "encrypted"
-master_key_file = "/run/secrets/storlite-master.key"
+master_key_file = "/run/secrets/litebucket-master.key"
 
 [admin]
-# Local admin API used by `storlite admin ...` (run it with
-# `docker compose exec storlite storlite admin ...`). Only the server's own
-# user and root may connect. compose.yaml mounts /run/storlite as tmpfs.
-socket = "/run/storlite/admin.sock"
+# Local admin API used by `litebucket admin ...` (run it with
+# `docker compose exec litebucket litebucket admin ...`). Only the server's own
+# user and root may connect. compose.yaml mounts /run/litebucket as tmpfs.
+socket = "/run/litebucket/admin.sock"
 
 [http]
 # S3 API listener. compose.yaml publishes container port 9000.
@@ -40,8 +40,8 @@ listen = "0.0.0.0:9000"
 # TLS certificate chain and private key (PEM). Required when listening on a
 # non-loopback address, unless trusted_proxy_mode is used. Loaded at startup:
 # restart after renewing the certificate.
-tls_certificate_file = "/run/secrets/storlite-tls.crt"
-tls_private_key_file = "/run/secrets/storlite-tls.key"
+tls_certificate_file = "/run/secrets/litebucket-tls.crt"
+tls_private_key_file = "/run/secrets/litebucket-tls.key"
 
 # Serve plain HTTP behind a TLS-terminating proxy instead of built-in TLS:
 # comment out the two tls_* lines above and set both of these. Only the listed

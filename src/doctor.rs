@@ -24,7 +24,7 @@ fn count(conn: &Connection, sql: &str) -> Result<i64> {
 pub fn doctor(cfg: &Config, full: bool) -> Result<bool> {
     let (data, conn, meta, _) = open_offline(cfg, false)?;
     let mut problems: Vec<String> = Vec::new();
-    println!("storlite {}", env!("CARGO_PKG_VERSION"));
+    println!("litebucket {}", env!("CARGO_PKG_VERSION"));
     println!(
         "sqlite {} ({})",
         metadata::sqlite_version(),
@@ -309,7 +309,8 @@ fn report_keys(
     }
     if admins == 0 {
         problems.push(
-            "no enabled admin access key (create one offline with `storlite admin recover`)".into(),
+            "no enabled admin access key (create one offline with `litebucket admin recover`)"
+                .into(),
         );
     }
     match crate::store::secret_codec(cfg)

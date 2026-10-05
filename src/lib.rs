@@ -1,4 +1,4 @@
-//! storlite: a compact single-host S3-compatible object store.
+//! litebucket: a compact single-host S3-compatible object store.
 
 pub mod admin;
 pub mod backup;

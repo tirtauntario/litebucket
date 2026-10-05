@@ -1,4 +1,4 @@
-# storlite — implementation report
+# litebucket — implementation report
 
 This report covers what was built against `docs/SPEC.md` 1.0, how, what was
 verified, and **every assumption made where the specification left room**.
@@ -8,7 +8,7 @@ Supporting detail: `docs/test-evidence.md`, `docs/benchmarks.md`, `docs/compatib
 ## 1. Outcome
 
 All seven milestones (0–6) are implemented in one Cargo package at the repo
-root, producing one executable, `storlite`. Every acceptance ID in the plan has
+root, producing one executable, `litebucket`. Every acceptance ID in the plan has
 executed evidence (60/60 pass). Real clients pass over HTTP and HTTPS: AWS CLI
 v2, Boto3, the Ruby SDK, Rails Active Storage, and headless Chrome. The full
 test suite, including a process crash matrix over every durable boundary,
@@ -77,10 +77,10 @@ Each is recorded where it applies; this list is the single overview.
 
 ### Project and dependencies
 
-1. **Name and layout.** `compact-s3` → `storlite` everywhere; one package at the
+1. **Name and layout.** `compact-s3` → `litebucket` everywhere; one package at the
    repo root; the spec bundle stays in `docs/` and generated docs live there too.
 2. **Protocol adapter.** `s3s` 0.17 was evaluated by source review and **not
-   adopted**; storlite has its own SigV4/XML/routing boundary so the
+   adopted**; litebucket has its own SigV4/XML/routing boundary so the
    capability validator, checksum pipeline, and fail-closed auth are fully
    under its control (ADR 0001). The spec prefers `s3s` but allows replacement.
 3. **Toolchain.** Pinned to the installed rustc 1.97.1. RustCrypto hashes on
@@ -204,7 +204,7 @@ Each is recorded where it applies; this list is the single overview.
 45. Request logs carry `request_id`, `operation`, `credential`, `status`,
     `code`, `detail`, `duration_ms`, `payload` mode; object keys only with
     `log_object_keys = true`.
-46. Configuration templates: `storlite config template [--docker]` prints the
+46. Configuration templates: `litebucket config template [--docker]` prints the
     commented templates `docs/examples/config.example.toml` and
     `deploy/config.toml` (embedded at build time). A unit test uncomments every
     documented `# key = value` line and checks that it equals the built-in
@@ -215,8 +215,8 @@ Each is recorded where it applies; this list is the single overview.
     implicit initialization), saves the first admin key from its output to
     `secrets/admin.env`, and starts the stack. It never overwrites existing
     files and sets ownership to uid 65532 on Linux. The admin socket lives on
-    a tmpfs (`/run/storlite`); `STORLITE_CONFIG` in the image lets
-    `docker compose exec storlite storlite admin ...` find the config.
+    a tmpfs (`/run/litebucket`); `LITEBUCKET_CONFIG` in the image lets
+    `docker compose exec litebucket litebucket admin ...` find the config.
 48. Admin changes: one transaction per change with its audit record; the key
     snapshot is rebuilt under `admin_lock` before the response, so changes
     apply to the next request and an older refresh can never overwrite a newer

@@ -39,7 +39,7 @@ History of the PUT figure (Linux): 794/s with group commit but a staging-
 directory sync at file creation; 1406/s after removing that unnecessary sync
 (ADR 0002). On macOS each PUT still pays three `F_FULLFSYNC`s for the file and
 directories plus its share of WAL syncs; each one flushes the whole drive
-cache, so macOS numbers are bounded by the device, not by storlite. With
+cache, so macOS numbers are bounded by the device, not by litebucket. With
 Boto3 as the client (Python, 16 threads, one session per thread) the macOS
 figure was 45/s before group commit and 54/s after; DELETE (metadata only)
 shows the group-commit effect most clearly.
@@ -67,7 +67,7 @@ After ~32k objects and ~3 GiB of data: metadata database 12.3 MB, WAL 4.3 MB
 cargo build --release
 .interop/venv/bin/python scripts/bench.py --large-mib 1024 --small-count 2000
 cargo run --release --example load -- 1600 16
-docker run --rm -v "$PWD":/src:ro -v storlite-linux-target:/target -v storlite-linux-tmp:/tmp \
+docker run --rm -v "$PWD":/src:ro -v litebucket-linux-target:/target -v litebucket-linux-tmp:/tmp \
   -e CARGO_TARGET_DIR=/target -w /src rust:1.97.1-slim-trixie \
   cargo run --release --locked --example load -- 1600 16
 ```

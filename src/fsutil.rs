@@ -158,7 +158,7 @@ impl DataDir {
         for area in Area::ALL {
             let fd = open_dir_at(&root_fd, area.dir_name()).map_err(|e| {
                 Error::config(format!(
-                    "data directory is missing the {} area (run `storlite init`?): {e}",
+                    "data directory is missing the {} area (run `litebucket init`?): {e}",
                     area.dir_name()
                 ))
             })?;

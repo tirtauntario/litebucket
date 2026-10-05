@@ -1,9 +1,9 @@
-# storlite configuration.
+# litebucket configuration.
 #
-# Generate this file with `storlite config template > config.toml`.
+# Generate this file with `litebucket config template > config.toml`.
 # Lines starting with "# key = value" show the built-in default. To change a
 # setting, remove the leading "# " and edit the value. Unknown keys are errors.
-# Check your edits with `storlite config check --config config.toml`.
+# Check your edits with `litebucket config check --config config.toml`.
 #
 # Units: *_bytes are plain integers (1 GiB = 1073741824); durations carry
 # their unit in the name (*_seconds, *_ms).
@@ -17,7 +17,7 @@ region = "us-east-1"
 
 [secrets]
 # Access keys live in the metadata database. "encrypted" seals each secret
-# with AES-256-GCM under the master key file (`storlite init` creates it if it
+# with AES-256-GCM under the master key file (`litebucket init` creates it if it
 # is missing; back it up separately and keep it out of data_dir). "plaintext"
 # relies on file permissions only, and every backup then contains usable
 # secrets. Changing the mode converts all stored secrets at the next start;
@@ -26,7 +26,7 @@ region = "us-east-1"
 master_key_file = "./master.key"
 
 [admin]
-# Local admin API used by `storlite admin ...`. Only the server's own user and
+# Local admin API used by `litebucket admin ...`. Only the server's own user and
 # root may connect (checked with the peer's credentials, plus mode 0600).
 # socket = "./admin.sock"
 
@@ -38,8 +38,8 @@ allow_insecure_loopback_http = true
 # To serve other machines, listen on "0.0.0.0:9000", remove
 # allow_insecure_loopback_http, and set a TLS certificate chain and private
 # key (PEM). Loaded at startup: restart after renewing the certificate.
-# tls_certificate_file = "/etc/storlite/tls.crt"
-# tls_private_key_file = "/etc/storlite/tls.key"
+# tls_certificate_file = "/etc/litebucket/tls.crt"
+# tls_private_key_file = "/etc/litebucket/tls.key"
 
 # Or serve plain HTTP behind a TLS-terminating proxy on another host. Only the
 # listed peer IPs may connect; X-Forwarded-* headers are never trusted.

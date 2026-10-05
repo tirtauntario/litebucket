@@ -360,6 +360,7 @@ fn fingerprint(
     full_checksum: Option<(Algorithm, String)>,
 ) -> [u8; 32] {
     let mut h = Sha256::new();
+    // Pre-rename domain tag, kept so stored completion fingerprints still match.
     h.update(b"storlite-complete-v1\n");
     h.update(upload_id.as_bytes());
     for p in parts {
@@ -832,11 +833,11 @@ pub async fn list_parts(cx: &Cx) -> S3Result<Response<Body>> {
     }
     w.open("Initiator")
         .elem("ID", &cx.store.meta.owner_id)
-        .elem("DisplayName", "storlite")
+        .elem("DisplayName", "litebucket")
         .close("Initiator")
         .open("Owner")
         .elem("ID", &cx.store.meta.owner_id)
-        .elem("DisplayName", "storlite")
+        .elem("DisplayName", "litebucket")
         .close("Owner")
         .elem("StorageClass", "STANDARD");
     if upload.checksum_explicit {

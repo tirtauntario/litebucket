@@ -177,7 +177,7 @@ pub fn open_offline(
     let db_path = data.db_path();
     if !db_path.exists() {
         return Err(Error::config(format!(
-            "{} has no metadata database; refusing to create an empty store (run `storlite init` for a new store)",
+            "{} has no metadata database; refusing to create an empty store (run `litebucket init` for a new store)",
             config.data_dir.display()
         )));
     }
@@ -244,7 +244,7 @@ impl Store {
         let set = crate::admin::load_credential_set(&conn, &codec, &store_id, now_ms())?;
         if set.enabled_count() == 0 {
             return Err(Error::config(
-                "no enabled access keys; refusing to start an S3 endpoint without authentication (with the server stopped, run `storlite admin recover` to create an admin key)",
+                "no enabled access keys; refusing to start an S3 endpoint without authentication (with the server stopped, run `litebucket admin recover` to create an admin key)",
             ));
         }
         let credentials = CredentialStore::new(set);

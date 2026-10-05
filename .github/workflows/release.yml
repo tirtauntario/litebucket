@@ -56,16 +56,16 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Smoke test
         if: ${{ !matrix.cross }}
-        run: target/${{ matrix.target }}/release/storlite --version
+        run: target/${{ matrix.target }}/release/litebucket --version
       - name: Package
         shell: bash
         run: |
-          name="storlite-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="litebucket-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp "target/${{ matrix.target }}/release/storlite" "dist/$name/"
+          cp "target/${{ matrix.target }}/release/litebucket" "dist/$name/"
           cp LICENSE README.md CHANGELOG.md "dist/$name/"
           cp docs/examples/config.example.toml "dist/$name/"
-          cp deploy/storlite.service "dist/$name/"
+          cp deploy/litebucket.service "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@v4
@@ -96,7 +96,7 @@ jobs:
           prerelease=""
           case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes $prerelease \
-            --title "storlite $GITHUB_REF_NAME" \
+            --title "litebucket $GITHUB_REF_NAME" \
             *.tar.gz *.sha256 SHA256SUMS
 
   image:

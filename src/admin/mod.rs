@@ -279,7 +279,7 @@ fn not_found_bucket(name: &str) -> Error {
 }
 
 /// Refuse a change that would leave no enabled, unexpired admin key. (An
-/// operator can still recover offline with `storlite admin recover`.)
+/// operator can still recover offline with `litebucket admin recover`.)
 fn keep_an_admin(conn: &Connection, cx: &Ctx<'_>) -> Result<()> {
     if queries::usable_admin_count(conn, cx.now_ms)? == 0 {
         return Err(Error::Conflict(
@@ -736,7 +736,7 @@ pub fn create_admin_key(conn: &Connection, cx: &Ctx<'_>, id: Option<String>) -> 
         cx,
         &CreateKeyRequest {
             access_key_id: id,
-            description: "admin key created by storlite".into(),
+            description: "admin key created by litebucket".into(),
             enabled: Some(true),
             global_grants: vec!["admin".into()],
             ..Default::default()

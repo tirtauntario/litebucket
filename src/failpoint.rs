@@ -1,7 +1,7 @@
 //! Test-only crash and fault injection.
 //!
 //! Compiled to no-ops unless the `failpoints` feature is enabled. When enabled,
-//! `STORLITE_FAILPOINTS="name=action,..."` selects actions: `abort` kills the
+//! `LITEBUCKET_FAILPOINTS="name=action,..."` selects actions: `abort` kills the
 //! process (SIGABRT, no cleanup), `eio`/`enospc` make an I/O point fail.
 //! Failpoints are never reachable remotely.
 
@@ -23,7 +23,7 @@ mod imp {
         static T: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
         T.get_or_init(|| {
             let mut m = HashMap::new();
-            if let Ok(spec) = std::env::var("STORLITE_FAILPOINTS") {
+            if let Ok(spec) = std::env::var("LITEBUCKET_FAILPOINTS") {
                 for item in spec.split(',').filter(|s| !s.is_empty()) {
                     let (k, v) = item.split_once('=').unwrap_or((item, "abort"));
                     m.insert(k.to_string(), v.to_string());

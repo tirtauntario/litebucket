@@ -21,6 +21,8 @@ use crate::ids::{StoreId, random_bytes};
 pub const SCHEME_PLAINTEXT: i64 = 0;
 pub const SCHEME_AES256GCM_V1: i64 = 1;
 
+// Bound into every sealed secret; keeps the pre-rename name so existing
+// encrypted keys still open.
 const AAD_PREFIX: &[u8] = b"storlite-credential-secret-v1\0";
 
 /// A secret as stored in the database.

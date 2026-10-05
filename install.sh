@@ -1,19 +1,19 @@
 #!/bin/sh
-# storlite installer: downloads a release binary from GitHub, verifies its
+# litebucket installer: downloads a release binary from GitHub, verifies its
 # SHA-256 checksum, and installs it.
 #
-#   curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/tirtauntario/litebucket/main/install.sh | sh
 #
 # Environment:
-#   STORLITE_VERSION      release tag to install (default: latest, e.g. v0.1.0)
-#   STORLITE_INSTALL_DIR  destination directory (default: /usr/local/bin)
+#   LITEBUCKET_VERSION      release tag to install (default: latest, e.g. v0.1.0)
+#   LITEBUCKET_INSTALL_DIR  destination directory (default: /usr/local/bin)
 set -eu
 
-REPO="tirtauntario/storlite"
-VERSION="${STORLITE_VERSION:-latest}"
-INSTALL_DIR="${STORLITE_INSTALL_DIR:-/usr/local/bin}"
+REPO="tirtauntario/litebucket"
+VERSION="${LITEBUCKET_VERSION:-latest}"
+INSTALL_DIR="${LITEBUCKET_INSTALL_DIR:-/usr/local/bin}"
 
-say() { printf 'storlite-install: %s\n' "$*"; }
+say() { printf 'litebucket-install: %s\n' "$*"; }
 die() { say "error: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required"; }
 
@@ -42,13 +42,13 @@ target="${arch}-${os}"
 if [ "$VERSION" = "latest" ]; then
   tmp_json="$(mktemp)"
   fetch "https://api.github.com/repos/${REPO}/releases/latest" "$tmp_json" ||
-    die "cannot query the latest release (set STORLITE_VERSION=vX.Y.Z)"
+    die "cannot query the latest release (set LITEBUCKET_VERSION=vX.Y.Z)"
   VERSION="$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$tmp_json" | head -n1)"
   rm -f "$tmp_json"
   [ -n "$VERSION" ] || die "cannot determine the latest release"
 fi
 
-name="storlite-${VERSION}-${target}"
+name="litebucket-${VERSION}-${target}"
 base="https://github.com/${REPO}/releases/download/${VERSION}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -79,7 +79,7 @@ if [ ! -d "$INSTALL_DIR" ] || [ ! -w "$INSTALL_DIR" ]; then
   fi
   $sudo mkdir -p "$INSTALL_DIR"
 fi
-$sudo install -m 0755 "${work}/${name}/storlite" "${INSTALL_DIR}/storlite"
+$sudo install -m 0755 "${work}/${name}/litebucket" "${INSTALL_DIR}/litebucket"
 
-say "installed $("${INSTALL_DIR}/storlite" --version) to ${INSTALL_DIR}/storlite"
+say "installed $("${INSTALL_DIR}/litebucket" --version) to ${INSTALL_DIR}/litebucket"
 say "example config and systemd unit: https://github.com/${REPO}/tree/${VERSION}"

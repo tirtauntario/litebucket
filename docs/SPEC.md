@@ -1,9 +1,9 @@
 # Single-Host S3-Compatible Object Storage
 ## Implementation specification for Codex
 
-> **Note for readers:** this is the original design contract that storlite was
+> **Note for readers:** this is the original design contract that litebucket was
 > built against, kept for reference. `compact-s3` below is the placeholder
-> name for `storlite`. The implementation plan and agent prompts it mentions
+> name for `litebucket`. The implementation plan and agent prompts it mentions
 > were build-time material and are not part of this repository. For how the
 > implementation resolved open points, see
 > [implementation-report.md](implementation-report.md); for user

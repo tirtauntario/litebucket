@@ -1,21 +1,21 @@
-# systemd unit for a standalone storlite install. See docs/installation.md.
-#   install -m 0644 storlite.service /etc/systemd/system/storlite.service
-#   systemctl daemon-reload && systemctl enable --now storlite
+# systemd unit for a standalone litebucket install. See docs/installation.md.
+#   install -m 0644 litebucket.service /etc/systemd/system/litebucket.service
+#   systemctl daemon-reload && systemctl enable --now litebucket
 [Unit]
-Description=storlite S3-compatible object storage
-Documentation=https://github.com/tirtauntario/storlite
+Description=litebucket S3-compatible object storage
+Documentation=https://github.com/tirtauntario/litebucket
 After=network-online.target local-fs.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=storlite
-Group=storlite
-ExecStart=/usr/local/bin/storlite serve --config /etc/storlite/config.toml
-# /run/storlite holds the admin API socket (config: [admin] socket =
-# "/run/storlite/admin.sock"). Manage keys with
-#   sudo -u storlite storlite admin --config /etc/storlite/config.toml key list
-RuntimeDirectory=storlite
+User=litebucket
+Group=litebucket
+ExecStart=/usr/local/bin/litebucket serve --config /etc/litebucket/config.toml
+# /run/litebucket holds the admin API socket (config: [admin] socket =
+# "/run/litebucket/admin.sock"). Manage keys with
+#   sudo -u litebucket litebucket admin --config /etc/litebucket/config.toml key list
+RuntimeDirectory=litebucket
 RuntimeDirectoryMode=0700
 # SIGTERM drains requests within maintenance.shutdown_grace_seconds (30 s by
 # default); allow a margin before systemd escalates to SIGKILL.
@@ -28,7 +28,7 @@ LimitNOFILE=8192
 # Hardening: only the data directory is writable.
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/storlite
+ReadWritePaths=/var/lib/litebucket
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true

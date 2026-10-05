@@ -49,7 +49,7 @@ this was discovered).
 ## Crash matrix (OPS-02)
 
 Each case: seed state with a clean server → restart with
-`STORLITE_FAILPOINTS=<point>=abort` → issue one request (process aborts) →
+`LITEBUCKET_FAILPOINTS=<point>=abort` → issue one request (process aborts) →
 restart → verify → offline `gc --apply` and `check --full` must pass with no
 staging files left.
 
@@ -92,7 +92,7 @@ refuses SigV2).
 
 `deploy/Dockerfile` image with the container config (now `deploy/config.toml`; TLS, secrets
 volume owned by uid 65532 mode 0400, `--read-only`, `--cap-drop ALL`,
-`no-new-privileges`): `storlite init` → `serve` → AWS CLI 12 MB multipart
+`no-new-privileges`): `litebucket init` → `serve` → AWS CLI 12 MB multipart
 upload/download over TLS (ETag `…-2`, byte-identical) → `healthcheck` OK →
 `docker stop` (log `drained: true`) → offline `check --full`: `result: OK`.
 
@@ -101,9 +101,9 @@ upload/download over TLS (ETag `…-2`, byte-identical) → `healthcheck` OK →
 | Check | Environment | Result |
 |---|---|---|
 | `cargo test --locked --features failpoints --target aarch64-unknown-linux-musl` (static release target) | Linux container (`rust:1.97.1-slim-trixie` + `musl-tools`, ext4 volume) | 82 unit + 57 integration: **139 passed, 0 failed** |
-| `cargo build --release --locked --target aarch64-unknown-linux-musl` | same | 6.9 MB static binary; `storlite --version` OK |
+| `cargo build --release --locked --target aarch64-unknown-linux-musl` | same | 6.9 MB static binary; `litebucket --version` OK |
 | README standalone quick start, run verbatim (`config template` → `init --admin-key-output` (creates `master.key`) → `serve` → AWS CLI `mb`/`cp`/`ls` → `admin key create` → SIGTERM) | macOS | pass; socket mode 0600 while serving and removed at shutdown; shutdown `drained: true` |
-| `deploy/setup.sh` with the local image (`STORLITE_PORT=9443`) after the access-key move | Docker Desktop 29.7.2 | creates `master.key` (0400), TLS pair, `admin.env` (0600, from `init` output); container `healthy`; admin key works for `s3 mb`; `docker compose exec storlite storlite admin key create/list`, `bucket create --quota`, `status`, `audit` work (actor `uid:65532`); a key scoped to one bucket is refused on another |
+| `deploy/setup.sh` with the local image (`LITEBUCKET_PORT=9443`) after the access-key move | Docker Desktop 29.7.2 | creates `master.key` (0400), TLS pair, `admin.env` (0600, from `init` output); container `healthy`; admin key works for `s3 mb`; `docker compose exec litebucket litebucket admin key create/list`, `bucket create --quota`, `status`, `audit` work (actor `uid:65532`); a key scoped to one bucket is refused on another |
 | Admin socket access in the compose stack | Docker Desktop 29.7.2 | `exec` as the server uid 65532: allowed. As uid 1000: refused (permission denied on the 0600 socket in the 0700 tmpfs). As root: also refused, because `cap_drop: ALL` removes root's file-permission override; use the default exec user |
 | Earlier `deploy/setup.sh` runs (credentials-file era) | Docker Desktop 29.7.2 | re-run skips existing files and reports "already initialized"; invalid `config.toml` stops setup with the parse error |
 | Config edit flow: `sed -i` on `config.toml` (`max_buckets = 1`) → `docker compose restart` | Docker Desktop 29.7.2 | new value in effect (second CreateBucket → `TooManyBuckets`) |

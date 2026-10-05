@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use litebucket::config::Config;
+use litebucket::server::Running;
+use litebucket::sigv4;
+use litebucket::store::Store;
 use sha2::{Digest, Sha256};
-use storlite::config::Config;
-use storlite::server::Running;
-use storlite::sigv4;
-use storlite::store::Store;
 
 pub const ADMIN: (&str, &str) = ("admin-key", "adminsecretadminsecretadminsecret01");
 pub const APP: (&str, &str) = ("app-key", "appsecretappsecretappsecretappsec01");
@@ -32,15 +32,15 @@ pub const KEYS: &[(&str, &str, &[&str], &[&str])] = &[
 
 /// Insert the fixed test keys into a freshly initialized store (offline).
 pub fn seed_keys(cfg: &Config) {
-    use storlite::metadata::queries;
-    let codec = storlite::store::secret_codec(cfg).unwrap();
-    let (_data, conn, meta, _) = storlite::store::open_offline(cfg, true).unwrap();
+    use litebucket::metadata::queries;
+    let codec = litebucket::store::secret_codec(cfg).unwrap();
+    let (_data, conn, meta, _) = litebucket::store::open_offline(cfg, true).unwrap();
     for (id, secret, global, grants) in KEYS {
         let sealed = codec.seal(&meta.store_id, id, secret).unwrap();
         let grants: Vec<queries::GrantRow> = grants
             .iter()
             .map(|spec| {
-                let g = storlite::credentials::Grant::parse_spec(spec).unwrap();
+                let g = litebucket::credentials::Grant::parse_spec(spec).unwrap();
                 queries::GrantRow {
                     bucket: g.bucket.clone(),
                     prefix: g.prefix.clone(),
@@ -58,7 +58,7 @@ pub fn seed_keys(cfg: &Config) {
                 expires_at_ms: None,
                 global,
                 grants: &grants,
-                now_ms: storlite::metadata::now_ms(),
+                now_ms: litebucket::metadata::now_ms(),
             },
         )
         .unwrap();
@@ -129,7 +129,7 @@ impl TestServer {
         let dir = tempfile::tempdir().unwrap();
         let config_path = write_config(dir.path(), extra);
         let cfg = load_config(&config_path);
-        storlite::store::initialize(&cfg).unwrap();
+        litebucket::store::initialize(&cfg).unwrap();
         seed_keys(&cfg);
         let mut s = Self {
             dir,
@@ -145,7 +145,7 @@ impl TestServer {
     pub async fn boot(&mut self) {
         let cfg = load_config(&self.config_path);
         let store = Store::open(cfg).unwrap();
-        let running = storlite::server::start(store).await.unwrap();
+        let running = litebucket::server::start(store).await.unwrap();
         self.base = format!("http://{}", running.s3_addr);
         self.mgmt = format!("http://{}", running.management_addr);
         self.running = Some(running);
@@ -192,8 +192,8 @@ impl TestServer {
         let socket = self.admin_socket();
         let (method, path) = (method.to_string(), path.to_string());
         tokio::task::spawn_blocking(move || {
-            let c = storlite::admin::client::AdminClient::new(&socket);
-            let r: storlite::error::Result<serde_json::Value> = if method == "GET" {
+            let c = litebucket::admin::client::AdminClient::new(&socket);
+            let r: litebucket::error::Result<serde_json::Value> = if method == "GET" {
                 c.get(&path)
             } else if method == "DELETE" {
                 c.delete(&path)

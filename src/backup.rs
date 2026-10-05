@@ -25,6 +25,8 @@ use crate::metadata::{self, migrations, now_ms, with_write_tx};
 use crate::secrets::{MasterKey, SecretCodec};
 use crate::store::open_offline;
 
+/// Backup format marker. Keeps the pre-rename name so backups made by
+/// earlier releases still restore.
 pub const FORMAT: &str = "storlite-backup-v1";
 const INCOMPLETE: &str = "BACKUP_INCOMPLETE";
 const COMPLETE: &str = "BACKUP_COMPLETE";
@@ -38,7 +40,8 @@ pub struct Manifest {
     pub region: String,
     pub storage_format: i64,
     pub created_at_ms: i64,
-    pub storlite_version: String,
+    #[serde(rename = "storlite_version")]
+    pub litebucket_version: String,
     pub sqlite_version: String,
     pub database_sha256: String,
     pub database_bytes: u64,
@@ -230,7 +233,7 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
         region: meta.region.clone(),
         storage_format: meta.format_version,
         created_at_ms: now_ms(),
-        storlite_version: env!("CARGO_PKG_VERSION").into(),
+        litebucket_version: env!("CARGO_PKG_VERSION").into(),
         sqlite_version: metadata::sqlite_version(),
         database_sha256: db_sha,
         database_bytes: db_bytes,
@@ -316,7 +319,7 @@ fn check_keys(db: &Path, master_key_file: Option<&Path>, skip: bool) -> Result<(
     let Some(path) = master_key_file else {
         if sealed > 0 && !skip {
             return Err(Error::config(format!(
-                "the backup contains {sealed} encrypted access key secret(s); pass --master-key-file to verify them (or --skip-key-check, then `storlite admin recover --reset-keys`)"
+                "the backup contains {sealed} encrypted access key secret(s); pass --master-key-file to verify them (or --skip-key-check, then `litebucket admin recover --reset-keys`)"
             )));
         }
         return Ok(());

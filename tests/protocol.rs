@@ -563,7 +563,7 @@ async fn http_03_request_bounds() {
             "delete",
             &[(
                 "content-md5",
-                &storlite::checksums::md5_b64(body.as_bytes()),
+                &litebucket::checksums::md5_b64(body.as_bytes()),
             )],
             Payload::Signed(body.into_bytes()),
         )
@@ -606,7 +606,7 @@ async fn http_02_cors_preflight_and_actual_requests() {
             "PUT",
             "/docs",
             "cors",
-            &[("content-md5", &storlite::checksums::md5_b64(cfg))],
+            &[("content-md5", &litebucket::checksums::md5_b64(cfg))],
             Payload::Signed(cfg.to_vec()),
         )
         .await;
@@ -730,7 +730,7 @@ async fn management_endpoints() {
     assert!(r.text().contains("\"state\":\"writable\""));
     let m = raw("GET", &format!("{}/metrics", s.mgmt), &[], vec![]).await;
     let text = m.text();
-    assert!(text.contains("storlite_requests_total{operation=\"PutObject\",status=\"2xx\"}"));
+    assert!(text.contains("litebucket_requests_total{operation=\"PutObject\",status=\"2xx\"}"));
     assert!(
         !text.contains("docs/k") && !text.contains("admin-key"),
         "no keys or credential labels"

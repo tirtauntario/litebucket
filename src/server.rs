@@ -171,7 +171,7 @@ pub async fn start(store: Arc<Store>) -> Result<Running> {
         management = %management_addr,
         admin_socket = %admin_socket.display(),
         tls = cfg.tls_enabled(),
-        "storlite is ready"
+        "litebucket is ready"
     );
     Ok(Running {
         s3_addr,
@@ -208,7 +208,7 @@ impl Running {
         let db = store.db.clone();
         let _ = tokio::task::spawn_blocking(move || db.shutdown()).await;
         let drained = s3_drained && tasks_drained;
-        tracing::info!(event = "shutdown", drained, "storlite stopped");
+        tracing::info!(event = "shutdown", drained, "litebucket stopped");
         drained
     }
 }
@@ -270,102 +270,102 @@ async fn metrics(State(store): State<Arc<Store>>) -> Response<Body> {
     let db = store.db.stats();
     let gauges = [
         (
-            "storlite_active_uploads",
+            "litebucket_active_uploads",
             "Uploads (including part reception) in progress.",
             c.in_use(PermitKind::Upload) as f64,
         ),
         (
-            "storlite_active_downloads",
+            "litebucket_active_downloads",
             "Downloads in progress.",
             c.in_use(PermitKind::Download) as f64,
         ),
         (
-            "storlite_active_copies",
+            "litebucket_active_copies",
             "Server-side copies in progress.",
             c.in_use(PermitKind::Copy) as f64,
         ),
         (
-            "storlite_active_assemblies",
+            "litebucket_active_assemblies",
             "Multipart assemblies in progress.",
             c.in_use(PermitKind::Assembly) as f64,
         ),
         (
-            "storlite_rejected_admissions_total",
+            "litebucket_rejected_admissions_total",
             "Requests rejected waiting for a transfer permit.",
             c.stats.rejected_admissions.load(Ordering::Relaxed) as f64,
         ),
         (
-            "storlite_rejected_capacity_total",
+            "litebucket_rejected_capacity_total",
             "Writes rejected for disk or temporary-space limits.",
             c.stats.rejected_capacity.load(Ordering::Relaxed) as f64,
         ),
         (
-            "storlite_reserved_bytes",
+            "litebucket_reserved_bytes",
             "Bytes reserved by in-flight writes.",
             c.reserved_bytes() as f64,
         ),
         (
-            "storlite_multipart_part_bytes",
+            "litebucket_multipart_part_bytes",
             "Bytes held by committed multipart parts.",
             c.part_bytes() as f64,
         ),
         (
-            "storlite_fs_available_bytes",
+            "litebucket_fs_available_bytes",
             "Filesystem bytes available to the service.",
             fs.map(|f| f.avail_bytes as f64).unwrap_or(0.0),
         ),
         (
-            "storlite_fs_available_inodes",
+            "litebucket_fs_available_inodes",
             "Filesystem inodes available.",
             fs.map(|f| f.avail_inodes as f64).unwrap_or(0.0),
         ),
         (
-            "storlite_db_write_queue_depth",
+            "litebucket_db_write_queue_depth",
             "Queued metadata write jobs.",
             db.write_queue_depth.load(Ordering::Relaxed) as f64,
         ),
         (
-            "storlite_db_read_queue_depth",
+            "litebucket_db_read_queue_depth",
             "Queued metadata read jobs.",
             db.read_queue_depth.load(Ordering::Relaxed) as f64,
         ),
         (
-            "storlite_db_queue_rejections_total",
+            "litebucket_db_queue_rejections_total",
             "Metadata jobs rejected for a full queue.",
             db.queue_rejections.load(Ordering::Relaxed) as f64,
         ),
         (
-            "storlite_db_write_jobs_total",
+            "litebucket_db_write_jobs_total",
             "Metadata write jobs.",
             db.write_jobs.load(Ordering::Relaxed) as f64,
         ),
         (
-            "storlite_db_write_seconds_total",
+            "litebucket_db_write_seconds_total",
             "Time spent in metadata write jobs.",
             db.write_micros_total.load(Ordering::Relaxed) as f64 / 1e6,
         ),
         (
-            "storlite_db_commit_uncertain_total",
+            "litebucket_db_commit_uncertain_total",
             "Commits with an initially unknown outcome.",
             db.commit_uncertain.load(Ordering::Relaxed) as f64,
         ),
         (
-            "storlite_garbage_backlog_blobs",
+            "litebucket_garbage_backlog_blobs",
             "Tracked garbage awaiting deletion.",
             store.maintenance_gauges().0 as f64,
         ),
         (
-            "storlite_garbage_backlog_bytes",
+            "litebucket_garbage_backlog_bytes",
             "Tracked garbage bytes awaiting deletion.",
             store.maintenance_gauges().1 as f64,
         ),
         (
-            "storlite_multipart_active_uploads",
+            "litebucket_multipart_active_uploads",
             "Open or completing multipart uploads.",
             store.maintenance_gauges().2 as f64,
         ),
         (
-            "storlite_ready",
+            "litebucket_ready",
             "1 when serving.",
             if store.is_ready() { 1.0 } else { 0.0 },
         ),

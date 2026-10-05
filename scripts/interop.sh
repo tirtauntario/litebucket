@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run real-client interoperability suites against a local storlite.
+# Run real-client interoperability suites against a local litebucket.
 #
 #   scripts/interop.sh [ruby] [boto3] [awscli] [rails] [browser]   (default: all)
 #   INTEROP_TLS=1 scripts/interop.sh ...   # serve HTTPS with a throwaway self-signed cert
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${STORLITE_BIN:-$ROOT/target/debug/storlite}
+BIN=${LITEBUCKET_BIN:-$ROOT/target/debug/litebucket}
 VENV=${INTEROP_VENV:-$ROOT/.interop/venv}
 SUITES=("$@")
 [ ${#SUITES[@]} -eq 0 ] && SUITES=(ruby boto3 awscli rails browser)
@@ -19,7 +19,7 @@ export AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_EC2_M
 
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 PORT=$(free_port); MPORT=$(free_port)
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/storlite-interop.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/litebucket-interop.XXXXXX")
 cleanup() { [ -n "${PID:-}" ] && kill "$PID" 2>/dev/null && wait "$PID" 2>/dev/null; rm -rf "$WORK"; }
 trap cleanup EXIT
 
@@ -31,7 +31,7 @@ if [ "${INTEROP_TLS:-0}" = "1" ]; then
     -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>&1
   TLS_LINES="tls_certificate_file = \"./cert.pem\"
 tls_private_key_file = \"./key.pem\""
-  export STORLITE_CA_BUNDLE="$WORK/cert.pem"
+  export LITEBUCKET_CA_BUNDLE="$WORK/cert.pem"
 fi
 cat > "$WORK/config.toml" <<CFG
 data_dir = "./data"
@@ -61,10 +61,10 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 
-export STORLITE_ENDPOINT="$SCHEME://127.0.0.1:$PORT"
-export STORLITE_KEY_ID="$KEY_ID"
-export STORLITE_SECRET="$SECRET"
-export STORLITE_REGION=us-east-1
+export LITEBUCKET_ENDPOINT="$SCHEME://127.0.0.1:$PORT"
+export LITEBUCKET_KEY_ID="$KEY_ID"
+export LITEBUCKET_SECRET="$SECRET"
+export LITEBUCKET_REGION=us-east-1
 export INTEROP_WORK="$WORK"
 
 status=0

@@ -1,3 +1,3 @@
 fn main() -> std::process::ExitCode {
-    storlite::cli::run()
+    litebucket::cli::run()
 }

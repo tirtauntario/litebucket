@@ -1,6 +1,6 @@
 # Security model
 
-## What storlite protects
+## What litebucket protects
 
 - **Authentication:** every S3 request except a CORS preflight must carry a
   valid AWS SigV4 signature (header or presigned query) from an enabled,
@@ -71,10 +71,10 @@ before you report an issue, if you can.
 ## Reporting a vulnerability
 
 Do not open a public issue. Report it privately through
-[GitHub private vulnerability reporting](https://github.com/tirtauntario/storlite/security/advisories/new).
+[GitHub private vulnerability reporting](https://github.com/tirtauntario/litebucket/security/advisories/new).
 Include:
 
-- the version (`storlite --version`) and platform;
+- the version (`litebucket --version`) and platform;
 - the relevant configuration, **without secrets**;
 - steps to reproduce, and the impact you expect.
 

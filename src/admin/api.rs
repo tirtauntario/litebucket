@@ -355,7 +355,7 @@ pub fn bind(path: &Path) -> Result<UnixListener> {
     // sun_path holds 104 bytes on macOS and 108 on Linux, including the NUL.
     if path.as_os_str().len() > 100 {
         return Err(Error::config(format!(
-            "admin socket path {} is longer than 100 bytes; set [admin] socket to a shorter path (for example /run/storlite/admin.sock)",
+            "admin socket path {} is longer than 100 bytes; set [admin] socket to a shorter path (for example /run/litebucket/admin.sock)",
             path.display()
         )));
     }

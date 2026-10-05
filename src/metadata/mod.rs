@@ -262,7 +262,7 @@ impl Db {
         let writer_conn = open_connection(path, Role::Writer, cfg.busy_timeout_ms)?;
         let (wtx, wrx) = mpsc::channel(cfg.writer_queue_capacity);
         threads.push(spawn_worker(
-            "storlite-db-writer",
+            "litebucket-db-writer",
             writer_conn,
             wrx,
             path.to_path_buf(),
@@ -275,7 +275,7 @@ impl Db {
             let conn = open_connection(path, Role::Reader, cfg.busy_timeout_ms)?;
             let (tx, rx) = mpsc::channel(cfg.reader_queue_capacity);
             threads.push(spawn_worker(
-                &format!("storlite-db-reader-{i}"),
+                &format!("litebucket-db-reader-{i}"),
                 conn,
                 rx,
                 path.to_path_buf(),
@@ -466,7 +466,7 @@ fn run_group(conn: &mut Connection, batch: Vec<(&'static str, TxBody)>) {
             finishers.push(fin);
             continue;
         }
-        if tx.execute_batch("SAVEPOINT storlite_job").is_err() {
+        if tx.execute_batch("SAVEPOINT litebucket_job").is_err() {
             broken = true;
             let (_, fin) = body(None);
             finishers.push(fin);
@@ -474,9 +474,9 @@ fn run_group(conn: &mut Connection, batch: Vec<(&'static str, TxBody)>) {
         }
         let (ok, fin) = body(Some(&tx));
         let end = if ok {
-            "RELEASE storlite_job"
+            "RELEASE litebucket_job"
         } else {
-            "ROLLBACK TO storlite_job; RELEASE storlite_job"
+            "ROLLBACK TO litebucket_job; RELEASE litebucket_job"
         };
         if tx.execute_batch(end).is_err() {
             broken = true;

@@ -1,11 +1,11 @@
-# Active Storage service pointing at the local storlite under test.
-storlite:
+# Active Storage service pointing at the local litebucket under test.
+litebucket:
   service: S3
-  endpoint: <%= ENV.fetch("STORLITE_ENDPOINT") %>
-  region: <%= ENV.fetch("STORLITE_REGION") %>
-  bucket: <%= ENV.fetch("STORLITE_RAILS_BUCKET") %>
-  access_key_id: <%= ENV.fetch("STORLITE_KEY_ID") %>
-  secret_access_key: <%= ENV.fetch("STORLITE_SECRET") %>
+  endpoint: <%= ENV.fetch("LITEBUCKET_ENDPOINT") %>
+  region: <%= ENV.fetch("LITEBUCKET_REGION") %>
+  bucket: <%= ENV.fetch("LITEBUCKET_RAILS_BUCKET") %>
+  access_key_id: <%= ENV.fetch("LITEBUCKET_KEY_ID") %>
+  secret_access_key: <%= ENV.fetch("LITEBUCKET_SECRET") %>
   force_path_style: true
-  <% if ENV["STORLITE_CA_BUNDLE"] %>ssl_ca_bundle: <%= ENV["STORLITE_CA_BUNDLE"] %><% end %>
+  <% if ENV["LITEBUCKET_CA_BUNDLE"] %>ssl_ca_bundle: <%= ENV["LITEBUCKET_CA_BUNDLE"] %><% end %>
   public: false

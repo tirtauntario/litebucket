@@ -11,7 +11,7 @@ use crate::store::Store;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "storlite",
+    name = "litebucket",
     version,
     about = "Compact single-host S3-compatible object storage"
 )]
@@ -23,7 +23,7 @@ pub struct Cli {
 #[derive(Args, Debug, Clone)]
 pub(crate) struct ConfigArg {
     /// Path to the TOML configuration file.
-    #[arg(long, env = "STORLITE_CONFIG", default_value = "./config.toml")]
+    #[arg(long, env = "LITEBUCKET_CONFIG", default_value = "./config.toml")]
     pub(crate) config: PathBuf,
 }
 
@@ -140,7 +140,7 @@ pub fn run() -> ExitCode {
     match execute(cli) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("storlite: {e}");
+            eprintln!("litebucket: {e}");
             ExitCode::from(1)
         }
     }
@@ -349,11 +349,11 @@ fn serve(cfg: Config) -> Result<ExitCode> {
         sqlite_source_id = %crate::metadata::sqlite_source_id(),
         storage_format = crate::metadata::migrations::FORMAT_VERSION,
         config = %cfg.summary(),
-        "starting storlite"
+        "starting litebucket"
     );
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .thread_name("storlite")
+        .thread_name("litebucket")
         .build()?;
     runtime.block_on(async move {
         let store = Store::open(cfg)?;
@@ -377,7 +377,7 @@ async fn wait_for_signals() -> Result<()> {
         tokio::select! {
             // Access keys are managed through the admin API and apply
             // immediately; SIGHUP is accepted and ignored.
-            _ = hup.recv() => tracing::info!(event = "sighup_ignored", "SIGHUP ignored: access keys are managed with `storlite admin`"),
+            _ = hup.recv() => tracing::info!(event = "sighup_ignored", "SIGHUP ignored: access keys are managed with `litebucket admin`"),
             _ = term.recv() => break,
             _ = int.recv() => break,
         }

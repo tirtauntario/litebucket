@@ -1,20 +1,20 @@
 # SDK-02 (Ruby): default-checksum, metadata, listing, presign, and forced
-# multipart flows against a local storlite. Run via scripts/interop.sh.
+# multipart flows against a local litebucket. Run via scripts/interop.sh.
 require 'minitest/autorun'
 require 'aws-sdk-s3'
 require 'securerandom'
 require 'digest'
 require 'net/http'
 
-ENDPOINT = ENV.fetch('STORLITE_ENDPOINT')
+ENDPOINT = ENV.fetch('LITEBUCKET_ENDPOINT')
 raise "refusing non-local endpoint #{ENDPOINT}" unless ENDPOINT.match?(%r{\Ahttps?://127\.0\.0\.1:})
-CA = ENV['STORLITE_CA_BUNDLE']
+CA = ENV['LITEBUCKET_CA_BUNDLE']
 
 class RubySdkTest < Minitest::Test
   def self.client
     @client ||= Aws::S3::Client.new(
-      endpoint: ENDPOINT, region: ENV.fetch('STORLITE_REGION'), force_path_style: true,
-      credentials: Aws::Credentials.new(ENV.fetch('STORLITE_KEY_ID'), ENV.fetch('STORLITE_SECRET')),
+      endpoint: ENDPOINT, region: ENV.fetch('LITEBUCKET_REGION'), force_path_style: true,
+      credentials: Aws::Credentials.new(ENV.fetch('LITEBUCKET_KEY_ID'), ENV.fetch('LITEBUCKET_SECRET')),
       **(CA ? { ssl_ca_bundle: CA } : {})
     )
   end

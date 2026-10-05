@@ -68,7 +68,7 @@ id16!(StorageId);
 
 impl StorageId {
     /// New storage ID. With the `failpoints` feature, IDs listed in
-    /// `STORLITE_FORCE_STORAGE_IDS` (comma-separated hex) are handed out first
+    /// `LITEBUCKET_FORCE_STORAGE_IDS` (comma-separated hex) are handed out first
     /// so tests can inject collisions.
     pub fn allocate() -> Self {
         #[cfg(feature = "failpoints")]
@@ -76,7 +76,7 @@ impl StorageId {
             use std::sync::{Mutex, OnceLock};
             static FORCED: OnceLock<Mutex<Vec<StorageId>>> = OnceLock::new();
             let q = FORCED.get_or_init(|| {
-                let mut v: Vec<StorageId> = std::env::var("STORLITE_FORCE_STORAGE_IDS")
+                let mut v: Vec<StorageId> = std::env::var("LITEBUCKET_FORCE_STORAGE_IDS")
                     .unwrap_or_default()
                     .split(',')
                     .filter_map(StorageId::parse_hex)

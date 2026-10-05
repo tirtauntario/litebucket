@@ -1,6 +1,6 @@
-# storlite S3 compatibility report
+# litebucket S3 compatibility report
 
-storlite implements a scoped subset of the Amazon S3 API for single-host
+litebucket implements a scoped subset of the Amazon S3 API for single-host
 application storage. It is **not** a full S3 replacement. Everything below is
 backed by executed tests (see `docs/test-evidence.md`); anything not listed is
 unsupported and is rejected explicitly rather than ignored.
@@ -86,7 +86,7 @@ modes are covered by AWS-published signature vectors and wire fixtures.
 | Ranged and `partNumber` GETs omit whole-object checksum headers. | A whole-object checksum must not appear to authenticate a partial body. |
 | Missing `Content-Length` without `Transfer-Encoding` means an empty body; chunked transfer without `Content-Length` or `x-amz-decoded-content-length` → `MissingContentLength` (411). | HTTP/1.1 semantics; S3 also requires a length. |
 | Unknown `x-amz-*` headers and unknown query parameters are rejected (`NotImplemented` / `InvalidArgument`). | Fail closed rather than ignore semantics; `x-id` and SigV4 query parameters are allowlisted. |
-| Logical byte quota per bucket (`QuotaExceeded`, 403) set through the local admin API (`storlite admin bucket set-quota`); no S3 quota API. | Spec §13.3. |
+| Logical byte quota per bucket (`QuotaExceeded`, 403) set through the local admin API (`litebucket admin bucket set-quota`); no S3 quota API. | Spec §13.3. |
 | Access keys are created, scoped, rotated and revoked through the local admin API and stored in the metadata database (spec: a separate operator-managed credentials file). There is no IAM/STS API. | ADR 0004. |
 | Disk-reserve or temporary-space exhaustion → `ServiceUnavailable` (503, retryable); admission/queue timeouts → `SlowDown` (503). | Retryable overload signals. |
 | Multi-page listings are not a single snapshot. | Each page is one short read transaction; concurrent changes can affect later pages. |

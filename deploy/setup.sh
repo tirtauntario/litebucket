@@ -1,12 +1,12 @@
 #!/bin/sh
-# Set up storlite with Docker Compose in one step.
+# Set up litebucket with Docker Compose in one step.
 #
-#   mkdir storlite && cd storlite
-#   curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy/setup.sh | sh
+#   mkdir litebucket && cd litebucket
+#   curl -fsSL https://raw.githubusercontent.com/tirtauntario/litebucket/main/deploy/setup.sh | sh
 #
 # Creates (never overwrites) in the target directory:
 #   compose.yaml            the service definition
-#   .env                    STORLITE_IMAGE pinned to the exact version, STORLITE_PORT
+#   .env                    LITEBUCKET_IMAGE pinned to the exact version, LITEBUCKET_PORT
 #   config.toml             commented server configuration (edit, then restart)
 #   secrets/master.key      encrypts the access keys stored in the database
 #   secrets/tls.crt, tls.key  a self-signed certificate, unless you put real ones there first
@@ -16,23 +16,23 @@
 #
 # Usage: setup.sh [DIR]          (default: current directory)
 # Environment:
-#   STORLITE_IMAGE      image to use (default ghcr.io/tirtauntario/storlite:latest)
-#   STORLITE_PORT       host port (default 9000)
-#   STORLITE_HOSTNAMES  extra names/IPs for the self-signed certificate,
+#   LITEBUCKET_IMAGE      image to use (default ghcr.io/tirtauntario/litebucket:latest)
+#   LITEBUCKET_PORT       host port (default 9000)
+#   LITEBUCKET_HOSTNAMES  extra names/IPs for the self-signed certificate,
 #                       comma-separated, e.g. "storage.example.com,10.0.0.5"
-#   STORLITE_START=0    create files only; do not initialize or start
-#   STORLITE_REF        git ref to download compose.yaml from (default main)
+#   LITEBUCKET_START=0    create files only; do not initialize or start
+#   LITEBUCKET_REF        git ref to download compose.yaml from (default main)
 set -eu
 
-REPO="tirtauntario/storlite"
+REPO="tirtauntario/litebucket"
 DEFAULT_IMAGE="ghcr.io/${REPO}"
-IMAGE="${STORLITE_IMAGE:-${DEFAULT_IMAGE}:latest}"
-PORT="${STORLITE_PORT:-9000}"
-REF="${STORLITE_REF:-main}"
-START="${STORLITE_START:-1}"
+IMAGE="${LITEBUCKET_IMAGE:-${DEFAULT_IMAGE}:latest}"
+PORT="${LITEBUCKET_PORT:-9000}"
+REF="${LITEBUCKET_REF:-main}"
+START="${LITEBUCKET_START:-1}"
 CONTAINER_UID=65532
 
-say() { printf 'storlite-setup: %s\n' "$*"; }
+say() { printf 'litebucket-setup: %s\n' "$*"; }
 die() { say "error: $*" >&2; exit 1; }
 
 # Resolve this script's directory before changing directories (empty when piped).
@@ -74,7 +74,7 @@ if [ ! -f compose.yaml ]; then
 fi
 
 if [ ! -f .env ]; then
-  printf 'STORLITE_IMAGE=%s\nSTORLITE_PORT=%s\n' "$pinned" "$PORT" > .env
+  printf 'LITEBUCKET_IMAGE=%s\nLITEBUCKET_PORT=%s\n' "$pinned" "$PORT" > .env
   say "created .env (image $pinned, port $PORT)"
 fi
 
@@ -97,7 +97,7 @@ if [ ! -f secrets/tls.crt ] && [ ! -f secrets/tls.key ]; then
   san="DNS:localhost,IP:127.0.0.1"
   cn="localhost"
   old_ifs="$IFS"; IFS=','
-  for name in ${STORLITE_HOSTNAMES:-}; do
+  for name in ${LITEBUCKET_HOSTNAMES:-}; do
     if [ -z "$name" ]; then continue; fi
     case "$name" in
       *[!0-9.]* ) case "$name" in *:*) san="$san,IP:$name" ;; *) san="$san,DNS:$name"; cn="$name" ;; esac ;;
@@ -131,23 +131,23 @@ if [ "$(uname -s)" = "Linux" ]; then
   done
 fi
 
-if ! out="$(docker compose run --rm -T storlite config check 2>&1)"; then
+if ! out="$(docker compose run --rm -T litebucket config check 2>&1)"; then
   printf '%s\n' "$out" | grep -v '^ ' >&2 || true   # drop compose progress lines
   die "config.toml is invalid"
 fi
 
 # Report the port compose will actually use.
-PORT="$(sed -n 's/^STORLITE_PORT=//p' .env | tail -n1)"
+PORT="$(sed -n 's/^LITEBUCKET_PORT=//p' .env | tail -n1)"
 PORT="${PORT:-9000}"
 
 if [ "$START" = "0" ]; then
   say "files are ready. Start with:"
-  say "  docker compose run --rm storlite init     # prints the first admin key once"
+  say "  docker compose run --rm litebucket init     # prints the first admin key once"
   say "  docker compose up -d"
   exit 0
 fi
 
-if out="$(docker compose run --rm -T storlite init 2>&1)"; then
+if out="$(docker compose run --rm -T litebucket init 2>&1)"; then
   key_id="$(printf '%s\n' "$out" | sed -n 's/^access_key_id: *//p' | tail -n1)"
   key_secret="$(printf '%s\n' "$out" | sed -n 's/^secret_access_key: *//p' | tail -n1)"
   [ -n "$key_id" ] && [ -n "$key_secret" ] || die "init did not report an admin key"
@@ -163,9 +163,9 @@ fi
 
 docker compose up -d >/dev/null 2>&1 || die "docker compose up failed (see: docker compose logs)"
 i=0
-until [ "$(docker compose ps --format '{{.Health}}' storlite 2>/dev/null)" = "healthy" ]; do
+until [ "$(docker compose ps --format '{{.Health}}' litebucket 2>/dev/null)" = "healthy" ]; do
   i=$((i + 1))
-  [ "$i" -le 60 ] || die "storlite did not become healthy (see: docker compose logs storlite)"
+  [ "$i" -le 60 ] || die "litebucket did not become healthy (see: docker compose logs litebucket)"
   sleep 1
 done
 
@@ -174,7 +174,7 @@ admin_hint="set -a; . secrets/admin.env; set +a"
 
 cat <<EOF
 
-storlite $version is running at https://localhost:${PORT}
+litebucket $version is running at https://localhost:${PORT}
 
   Admin access key:  secrets/admin.env (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)
   Region:            us-east-1, path-style addressing
@@ -184,12 +184,12 @@ storlite $version is running at https://localhost:${PORT}
     aws --endpoint-url https://localhost:${PORT} --ca-bundle secrets/tls.crt s3 mb s3://my-bucket
 
   Manage keys and buckets:
-    docker compose exec storlite storlite admin key create --grant 'my-bucket:read,list,write,delete'
-    docker compose exec storlite storlite admin key list
-    docker compose exec storlite storlite admin bucket list
+    docker compose exec litebucket litebucket admin key create --grant 'my-bucket:read,list,write,delete'
+    docker compose exec litebucket litebucket admin key list
+    docker compose exec litebucket litebucket admin bucket list
 
-  Change settings:   edit config.toml, then: docker compose restart storlite
+  Change settings:   edit config.toml, then: docker compose restart litebucket
   Change port/image: edit .env, then:        docker compose up -d
-  Logs:              docker compose logs -f storlite
+  Logs:              docker compose logs -f litebucket
   Back up secrets/master.key separately; restoring a backup's access keys needs it.
 EOF

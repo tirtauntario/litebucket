@@ -1,12 +1,12 @@
 [package]
-name = "storlite"
-version = "0.1.0"
+name = "litebucket"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.97"
 description = "Compact single-host S3-compatible object storage"
 license = "Apache-2.0"
-repository = "https://github.com/tirtauntario/storlite"
-homepage = "https://github.com/tirtauntario/storlite"
+repository = "https://github.com/tirtauntario/litebucket"
+homepage = "https://github.com/tirtauntario/litebucket"
 readme = "README.md"
 keywords = ["s3", "object-storage", "sqlite", "storage", "server"]
 categories = ["command-line-utilities", "web-programming::http-server"]

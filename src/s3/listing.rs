@@ -361,7 +361,7 @@ pub async fn list_objects_v2(cx: &Cx) -> S3Result<Response<Body>> {
                 if fetch_owner {
                     w.open("Owner")
                         .elem("ID", &cx.store.meta.owner_id)
-                        .elem("DisplayName", "storlite")
+                        .elem("DisplayName", "litebucket")
                         .close("Owner");
                 }
                 w.close("Contents");
@@ -498,11 +498,11 @@ pub async fn list_multipart_uploads(cx: &Cx) -> S3Result<Response<Body>> {
                     .elem("UploadId", &u.upload_id)
                     .open("Initiator")
                     .elem("ID", &cx.store.meta.owner_id)
-                    .elem("DisplayName", "storlite")
+                    .elem("DisplayName", "litebucket")
                     .close("Initiator")
                     .open("Owner")
                     .elem("ID", &cx.store.meta.owner_id)
-                    .elem("DisplayName", "storlite")
+                    .elem("DisplayName", "litebucket")
                     .close("Owner")
                     .elem("StorageClass", "STANDARD")
                     .elem("Initiated", &iso8601(u.created_at_ms));

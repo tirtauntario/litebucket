@@ -1,12 +1,12 @@
-# Rails Active Storage end-to-end checks against storlite (run with
+# Rails Active Storage end-to-end checks against litebucket (run with
 # `bin/rails runner`). Exits non-zero on the first failed check.
 require "net/http"
 require "securerandom"
 require "digest"
 require "aws-sdk-s3"
 
-raise "refusing non-local endpoint" unless ENV.fetch("STORLITE_ENDPOINT").match?(%r{\Ahttps?://127\.0\.0\.1:})
-CA = ENV["STORLITE_CA_BUNDLE"]
+raise "refusing non-local endpoint" unless ENV.fetch("LITEBUCKET_ENDPOINT").match?(%r{\Ahttps?://127\.0\.0\.1:})
+CA = ENV["LITEBUCKET_CA_BUNDLE"]
 def http_start(uri, &blk) = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", ca_file: CA, &blk)
 
 $passed = 0
@@ -22,7 +22,7 @@ end
 
 puts "rails #{Rails.version}, activestorage #{ActiveStorage.version}, aws-sdk-s3 #{Aws::S3::GEM_VERSION}"
 service = ActiveStorage::Blob.service
-service.send(:client).client.create_bucket(bucket: ENV.fetch("STORLITE_RAILS_BUCKET"))
+service.send(:client).client.create_bucket(bucket: ENV.fetch("LITEBUCKET_RAILS_BUCKET"))
 
 ActiveRecord::Schema.define { create_table(:documents, force: true) { |t| t.string :title } } rescue nil
 class Document < ActiveRecord::Base

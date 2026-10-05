@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use storlite::checksums::{Algorithm, b64, md5_b64};
+use litebucket::checksums::{Algorithm, b64, md5_b64};
 
 async fn setup() -> (TestServer, Client) {
     let s = TestServer::start().await;
@@ -480,7 +480,9 @@ async fn del_01_delete_is_idempotent_and_hides_immediately() {
     // Physical deletion is deferred to the collector.
     let store = s.store();
     let (blobs, _, _) = {
-        storlite::maintenance::refresh_gauges(&store).await.unwrap();
+        litebucket::maintenance::refresh_gauges(&store)
+            .await
+            .unwrap();
         store.maintenance_gauges()
     };
     assert_eq!(blobs, 1, "one garbage blob awaiting collection");
@@ -682,7 +684,7 @@ async fn key_bytes_are_preserved_exactly() {
     let l = c.get("/docs", "list-type=2&encoding-type=url").await;
     let mut want: Vec<String> = keys
         .iter()
-        .map(|k| storlite::s3::listing::url_encode(k.as_bytes()))
+        .map(|k| litebucket::s3::listing::url_encode(k.as_bytes()))
         .collect();
     want.sort();
     let mut got = l.all("Key");

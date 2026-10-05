@@ -51,7 +51,7 @@ jobs:
           file: deploy/Dockerfile
           push: false
           load: true
-          tags: storlite:ci
+          tags: litebucket:ci
           cache-from: type=gha,scope=ci
           cache-to: type=gha,scope=ci,mode=max
-      - run: docker run --rm storlite:ci --version
+      - run: docker run --rm litebucket:ci --version

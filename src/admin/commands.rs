@@ -1,4 +1,4 @@
-//! `storlite admin ...`: a client of the admin socket, plus the offline
+//! `litebucket admin ...`: a client of the admin socket, plus the offline
 //! `admin recover`.
 
 use std::io::Write;
@@ -26,7 +26,7 @@ pub struct AdminArgs {
     /// Configuration file; the admin socket path is read from it.
     #[arg(
         long,
-        env = "STORLITE_CONFIG",
+        env = "LITEBUCKET_CONFIG",
         default_value = "./config.toml",
         global = true
     )]
@@ -236,7 +236,7 @@ pub fn run(args: AdminArgs) -> Result<ExitCode> {
         AdminCommand::Status => {
             let s: StatusInfo = c.get("/v1/status")?;
             print_or_json(json, &s, |s| {
-                println!("storlite {}", s.version);
+                println!("litebucket {}", s.version);
                 println!("store id: {}  region: {}", s.store_id, s.region);
                 println!("secret protection: {}", s.secret_protection);
                 println!(
@@ -687,7 +687,7 @@ fn recover(
     }
     let codec = crate::store::secret_codec(&cfg).map_err(|e| {
         Error::config(format!(
-            "{e}\n  If the master key is lost, set secrets.protection = \"plaintext\" (or point master_key_file at a new key) and run `storlite admin recover --reset-keys`."
+            "{e}\n  If the master key is lost, set secrets.protection = \"plaintext\" (or point master_key_file at a new key) and run `litebucket admin recover --reset-keys`."
         ))
     })?;
     let (_data, mut conn, meta, _) = crate::store::open_offline(&cfg, true)?;

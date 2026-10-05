@@ -1,33 +1,33 @@
-# storlite with Docker Compose: one container, no database or worker services.
+# litebucket with Docker Compose: one container, no database or worker services.
 #
 # Easiest setup (creates config.toml, .env and secrets/, then starts):
-#   curl -fsSL https://raw.githubusercontent.com/tirtauntario/storlite/main/deploy/setup.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/tirtauntario/litebucket/main/deploy/setup.sh | sh
 #
 # Files next to this one:
-#   .env          STORLITE_IMAGE (pinned version) and STORLITE_PORT
+#   .env          LITEBUCKET_IMAGE (pinned version) and LITEBUCKET_PORT
 #   config.toml   server settings; edit, then `docker compose restart`
 #   secrets/      master.key, tls.crt, tls.key (owned by uid 65532 on Linux)
 # Manage access keys and buckets:
-#   docker compose exec storlite storlite admin key list
+#   docker compose exec litebucket litebucket admin key list
 # Manual setup and operations: docs/installation.md#docker
 services:
-  storlite:
-    image: ${STORLITE_IMAGE:-ghcr.io/tirtauntario/storlite:latest}
+  litebucket:
+    image: ${LITEBUCKET_IMAGE:-ghcr.io/tirtauntario/litebucket:latest}
     ports:
-      - "${STORLITE_PORT:-9000}:9000"
+      - "${LITEBUCKET_PORT:-9000}:9000"
     volumes:
-      - storlite-data:/data
-      - ./config.toml:/etc/storlite/config.toml:ro
+      - litebucket-data:/data
+      - ./config.toml:/etc/litebucket/config.toml:ro
     # The admin API socket lives here (in memory, owner-only).
     tmpfs:
-      - /run/storlite:uid=65532,gid=65532,mode=0700
+      - /run/litebucket:uid=65532,gid=65532,mode=0700
     secrets:
-      - source: storlite-master-key
-        target: storlite-master.key
-      - source: storlite-tls-crt
-        target: storlite-tls.crt
-      - source: storlite-tls-key
-        target: storlite-tls.key
+      - source: litebucket-master-key
+        target: litebucket-master.key
+      - source: litebucket-tls-crt
+        target: litebucket-tls.crt
+      - source: litebucket-tls-key
+        target: litebucket-tls.key
     # Stop the old process before starting a new one: never two writers.
     stop_grace_period: 40s
     restart: unless-stopped
@@ -39,12 +39,12 @@ services:
       nofile: { soft: 8192, hard: 8192 }
 
 secrets:
-  storlite-master-key:
+  litebucket-master-key:
     file: ./secrets/master.key
-  storlite-tls-crt:
+  litebucket-tls-crt:
     file: ./secrets/tls.crt
-  storlite-tls-key:
+  litebucket-tls-key:
     file: ./secrets/tls.key
 
 volumes:
-  storlite-data:
+  litebucket-data:
