@@ -148,6 +148,10 @@ pub async fn gc_once(store: &Arc<Store>) -> Result<usize> {
     if store.halted_reason().is_some() {
         return Ok(0);
     }
+    // An online backup copies files of its snapshot; none may go meanwhile.
+    let Some(_pass) = store.try_gc_pass() else {
+        return Ok(0);
+    };
     let limit = store.config.maintenance.garbage_batch_size;
     let now = now_ms();
     let batch = store

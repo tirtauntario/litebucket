@@ -10,6 +10,9 @@ First public release (0.1.0).
 
 ### Added
 
+- Online backup: `litebucket admin backup <destination>` (admin API
+  `POST /v1/backup`) takes the same verified backup while the server keeps
+  serving; garbage collection pauses until it completes.
 - `http.trusted_proxy_addresses` takes ranges in CIDR notation as well as
   addresses, for applications in containers whose addresses change.
 - S3-compatible API: path-style addressing, SigV4 header and presigned

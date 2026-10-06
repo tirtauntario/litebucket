@@ -235,7 +235,7 @@ Each is recorded where it applies; this list is the single overview.
 - macOS small-write throughput (~140 PUT/s) is dominated by `F_FULLFSYNC`
   drive-cache flushes; Linux/ext4 reaches ~1400 PUT/s on the same hardware.
 - Not implemented (by spec or deferred): UploadPartCopy, ListObjects v1,
-  virtual-hosted addressing, versioning, SSE, Object Lock, tagging, online
-  backup, HTTP/2, per-credential rate limits, unknown-length uploads.
+  virtual-hosted addressing, versioning, SSE, Object Lock, tagging,
+  HTTP/2, per-credential rate limits, unknown-length uploads.
 - The dev machine's disk was ~95% full; the default 5% free-space reserve
   will refuse writes on such a disk by design.

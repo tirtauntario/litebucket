@@ -57,8 +57,27 @@ pub struct Store {
     /// slower refresh can never install an older key set.
     pub admin_lock: tokio::sync::Mutex<()>,
     ready: AtomicBool,
+    /// Held by each garbage-collection pass and for a whole online backup,
+    /// so no file of the backup's snapshot is removed while it is copied.
+    gc_gate: Arc<tokio::sync::Mutex<()>>,
+    backup_running: Arc<AtomicBool>,
     pub startup: StartupReport,
     gauges: [std::sync::atomic::AtomicU64; 5],
+}
+
+/// Holds garbage collection paused for an online backup; see
+/// [`Store::pin_for_backup`].
+pub struct BackupPin {
+    _gate: tokio::sync::OwnedMutexGuard<()>,
+    _running: BackupRunning,
+}
+
+struct BackupRunning(Arc<AtomicBool>);
+
+impl Drop for BackupRunning {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 impl std::fmt::Debug for Store {
@@ -283,6 +302,8 @@ impl Store {
             credentials,
             secrets: codec,
             admin_lock: tokio::sync::Mutex::new(()),
+            gc_gate: Arc::default(),
+            backup_running: Arc::default(),
             ready: AtomicBool::new(false),
             startup: StartupReport {
                 sqlite_version: metadata::sqlite_version(),
@@ -386,6 +407,26 @@ impl Store {
 
     pub fn integrity_failed(&self) -> bool {
         self.integrity_failed.load(Ordering::SeqCst)
+    }
+
+    /// Starts an online backup: waits for a running garbage-collection pass,
+    /// then keeps collection paused until the returned pin is dropped. One
+    /// backup at a time.
+    pub async fn pin_for_backup(&self) -> Result<BackupPin> {
+        if self.backup_running.swap(true, Ordering::SeqCst) {
+            return Err(Error::Conflict("a backup is already running".into()));
+        }
+        let running = BackupRunning(self.backup_running.clone());
+        let gate = self.gc_gate.clone().lock_owned().await;
+        Ok(BackupPin {
+            _gate: gate,
+            _running: running,
+        })
+    }
+
+    /// Held by one garbage-collection pass; None while a backup holds it.
+    pub fn try_gc_pass(&self) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+        self.gc_gate.try_lock().ok()
     }
 
     pub fn is_blob_active(&self, id: &StorageId) -> bool {

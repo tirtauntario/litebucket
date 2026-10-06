@@ -183,6 +183,12 @@ pub struct CreateBucketRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupRequest {
+    /// Absolute path of a new directory on the server's file system.
+    pub destination: std::path::PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotaRequest {
     /// `null` clears the quota.
     pub quota_bytes: Option<u64>,

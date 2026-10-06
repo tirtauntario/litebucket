@@ -86,6 +86,7 @@ effective uid (from the socket's peer credentials) is its own or root.
 | `PUT /v1/buckets/{name}/quota` | `{quota_bytes: n \| null}` |
 | `PUT`/`DELETE /v1/buckets/{name}/cors` | `{rules: [...]}` (same limits as PutBucketCors) |
 | `GET /v1/audit?limit=N` | Newest audit records first |
+| `POST /v1/backup` | `{destination}` (absolute path on the server); online backup, answers when complete |
 
 Errors are `{"error": {"code", "message"}}` with 400 (`invalid_request`),
 404 (`not_found`), 409 (`conflict`), 503 (`overloaded`) or 500.
@@ -123,7 +124,8 @@ litebucket gc     --config config.toml --dry-run # default
 litebucket gc     --config config.toml --apply   # recovery + delete eligible tracked garbage
 litebucket admin  --config config.toml recover   # offline: new admin key (--reset-keys: drop all keys first)
 litebucket master-key generate --output ./master.key
-litebucket backup  --config config.toml --destination /backup/snapshot-001
+litebucket backup  --config config.toml --destination /backup/snapshot-001   # offline
+litebucket admin   --config config.toml backup /backup/snapshot-002          # online, server running
 litebucket restore --source /backup/snapshot-001 --data-dir /srv/litebucket-restored --master-key-file ./master.key
 ```
 
@@ -181,11 +183,24 @@ downloads, 16 uploads, 2 assemblies) a `nofile` limit of 4096 is ample;
 
 ## Backup and restore
 
-- Backups are **offline** (stop the server). `backup` normalizes interrupted
-  work, writes `BACKUP_INCOMPLETE`, snapshots SQLite (`VACUUM INTO`), copies
-  every referenced object/part file into the same sharded layout while
-  verifying size and SHA-256, writes `files.jsonl` + `manifest.json`, syncs
-  everything, then publishes `BACKUP_COMPLETE`.
+- A backup writes `BACKUP_INCOMPLETE`, snapshots SQLite (`VACUUM INTO`),
+  copies every object/part file that snapshot references into the same
+  sharded layout while verifying size and SHA-256, writes `files.jsonl` +
+  `manifest.json`, syncs everything, then publishes `BACKUP_COMPLETE`.
+- **Offline:** `litebucket backup` (server stopped; it takes the store lock)
+  also normalizes interrupted work first.
+- **Online:** `litebucket admin backup <destination>` asks the running server
+  to take the backup while it keeps serving. Garbage collection pauses for
+  the whole backup (waiting for a pass in progress), so no file of the
+  snapshot is removed before it is copied: committed files are immutable and
+  only the collector removes them. Writes and deletes carry on; the backup
+  holds exactly what had committed when the snapshot was taken. One backup
+  runs at a time (a second gets 409). The destination is a new directory on
+  the **server's** file system, so in a container it must be on a mounted
+  volume writable by the server's user. The command waits until the backup
+  is complete; an interrupted one stays `BACKUP_INCOMPLETE` and is refused
+  by `restore`. Its result is logged as `backup_complete` or
+  `backup_failed`.
 - The backup contains object data, metadata (including access keys, their
   grants and the audit log), and the listing-cursor HMAC key: treat it as
   sensitive (it is created mode 0700). Access-key secrets are encrypted unless

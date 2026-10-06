@@ -23,6 +23,7 @@ cargo clippy --locked --all-targets --features failpoints -- -D warnings   # pas
 
 | Command | Environment | Result |
 |---|---|---|
+| `cargo test --locked --features failpoints` (2026-10-06, after CIDR ranges and online backup) | macOS | 88 unit + 70 integration (admin 10, objects 14, protocol 13, multipart 9, operations 15, crash 9): **158 passed, 0 failed**; fmt and both clippy runs pass. Not re-run in the Linux container |
 | `cargo test --locked --features failpoints` | macOS | 87 unit + 67 integration (admin 9, objects 14, protocol 13, multipart 9, operations 13, crash 9): **154 passed, 0 failed** |
 | `cargo test --locked --features failpoints` (ext4 volume) | Linux container | 87 unit + 67 integration (admin 9, objects 14, protocol 13, multipart 9, operations 13, crash 9): **154 passed, 0 failed**; fmt and clippy (`-D warnings`, with failpoints) also pass in the container |
 

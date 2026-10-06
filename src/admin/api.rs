@@ -27,8 +27,8 @@ use tokio::net::UnixListener;
 use tokio::sync::watch;
 
 use super::{
-    CorsRequest, CreateBucketRequest, CreateKeyRequest, Ctx, GrantJson, QuotaRequest,
-    RemoveGrantRequest, RotateKeyRequest, UpdateKeyRequest,
+    BackupRequest, CorsRequest, CreateBucketRequest, CreateKeyRequest, Ctx, GrantJson,
+    QuotaRequest, RemoveGrantRequest, RotateKeyRequest, UpdateKeyRequest,
 };
 use crate::error::{Error, Result};
 use crate::metadata::{now_ms, queries};
@@ -148,6 +148,7 @@ pub fn router(store: Arc<Store>) -> Router {
         .route("/v1/buckets/{name}/quota", put(set_quota))
         .route("/v1/buckets/{name}/cors", put(put_cors).delete(delete_cors))
         .route("/v1/audit", get(audit))
+        .route("/v1/backup", post(backup))
         .fallback(not_found)
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY))
         .with_state(store)
@@ -164,6 +165,31 @@ async fn status(State(store): State<Arc<Store>>) -> ApiResult {
         super::status(c, &st.meta, &st.secrets, &set)
     })
     .await?)
+}
+
+/// Online backup. Answers when the backup is complete; collection of
+/// garbage files pauses until then.
+async fn backup(
+    State(store): State<Arc<Store>>,
+    Extension(actor): Extension<Actor>,
+    body: Bytes,
+) -> ApiResult {
+    let req: BackupRequest = parse(&body)?;
+    let pin = store.pin_for_backup().await?;
+    tracing::info!(event = "backup_started", actor = %actor.0, destination = %req.destination.display(), "online backup started");
+    let st = store.clone();
+    let task = tokio::task::spawn_blocking(move || {
+        crate::backup::backup_online(&st, &pin, &req.destination)
+    });
+    let summary = store
+        .tracker
+        .track_future(task)
+        .await
+        .map_err(|e| Error::other(format!("backup task failed: {e}")))?
+        .inspect_err(
+            |e| tracing::error!(event = "backup_failed", error = %e, "online backup failed"),
+        )?;
+    ok(summary)
 }
 
 async fn list_keys(State(store): State<Arc<Store>>) -> ApiResult {

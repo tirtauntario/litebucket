@@ -1,4 +1,5 @@
-//! Offline, consistent, verifiable backup and restore.
+//! Consistent, verifiable backup (offline, or online from the running
+//! server) and restore.
 //!
 //! A backup is a new mode-0700 directory containing a SQLite snapshot, every
 //! file referenced by that snapshot (objects and committed parts) in the same
@@ -20,10 +21,10 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::fsutil::{self, Area, DataDir, open_dir, sync_dir, sync_fd};
 use crate::ids::StorageId;
-use crate::metadata::queries::{self, BlobArea};
+use crate::metadata::queries::{self, BlobArea, StoreMeta};
 use crate::metadata::{self, migrations, now_ms, with_write_tx};
 use crate::secrets::{MasterKey, SecretCodec};
-use crate::store::open_offline;
+use crate::store::{BackupPin, Store, open_offline};
 
 /// Backup format marker.
 pub const FORMAT: &str = "litebucket-backup-v1";
@@ -145,13 +146,53 @@ fn sync_tree_dirs(paths: &[PathBuf], root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
+/// What a finished backup holds.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Summary {
+    pub destination: PathBuf,
+    pub store_id: String,
+    pub file_count: u64,
+    pub file_bytes: u64,
+    /// Access-key secrets stored in plaintext in the backup.
+    pub plaintext_secrets: i64,
+    /// Access-key secrets encrypted with the master key, which is not included.
+    pub encrypted_secrets: i64,
+}
+
+impl Summary {
+    pub fn print(&self) {
+        println!(
+            "backup complete: {} files, {} bytes, store {} -> {}",
+            self.file_count,
+            self.file_bytes,
+            self.store_id,
+            self.destination.display()
+        );
+        if self.plaintext_secrets > 0 {
+            println!(
+                "WARNING: this backup contains {} access-key secret(s) in plaintext; protect it like a password store",
+                self.plaintext_secrets
+            );
+        }
+        if self.encrypted_secrets > 0 {
+            println!(
+                "note: access keys are included, encrypted; restoring them needs the master key, which is NOT in the backup"
+            );
+        }
+        println!(
+            "note: the configuration and the master key file are not included; back them up separately"
+        );
+    }
+}
+
+/// The destination as an absolute path: new, and outside the data directory.
+fn check_destination(data_dir: &Path, destination: &Path) -> Result<PathBuf> {
     let dest_abs = if destination.is_absolute() {
         destination.to_path_buf()
     } else {
         std::env::current_dir()?.join(destination)
     };
-    if dest_abs.starts_with(&cfg.data_dir) {
+    if dest_abs.starts_with(data_dir) {
         return Err(Error::config(
             "the backup destination must not be inside the data directory",
         ));
@@ -162,24 +203,31 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
             dest_abs.display()
         )));
     }
-    let (data, mut conn, meta, _) = open_offline(cfg, true)?;
-    // Normalize interrupted operations without inventing committed objects.
-    let recovery = with_write_tx(&mut conn, |tx| queries::recover(tx, now_ms()))?;
-    if recovery.reopened_uploads + recovery.reclaimed_writing_blobs > 0 {
-        println!(
-            "recovered interrupted operations: {} uploads reopened, {} WRITING blobs reclaimed",
-            recovery.reopened_uploads, recovery.reclaimed_writing_blobs
-        );
-    }
-    fs::DirBuilder::new().mode(0o700).create(&dest_abs)?;
-    let mut marker = create_new_file(&dest_abs.join(INCOMPLETE))?;
+    Ok(dest_abs)
+}
+
+/// Create the destination, marked incomplete until [`finish`] publishes it.
+fn begin(dest: &Path) -> Result<()> {
+    fs::DirBuilder::new().mode(0o700).create(dest)?;
+    let mut marker = create_new_file(&dest.join(INCOMPLETE))?;
     writeln!(marker, "backup in progress; do not restore")?;
     sync_fd(&marker)?;
-    sync_dir(open_dir(&dest_abs)?)?;
+    sync_dir(open_dir(dest)?)?;
+    Ok(())
+}
 
-    let db_dest = dest_abs.join(fsutil::DB_FILE);
+/// Snapshot the metadata into the destination; one consistent read.
+fn snapshot(conn: &rusqlite::Connection, dest: &Path) -> Result<()> {
+    let db_dest = dest.join(fsutil::DB_FILE);
     conn.execute("VACUUM INTO ?1", [db_dest.to_string_lossy().as_ref()])?;
     sync_fd(open_nofollow(&db_dest)?)?;
+    Ok(())
+}
+
+/// Copy and verify every file the snapshot references, then write the
+/// manifests and publish `BACKUP_COMPLETE`.
+fn finish(data: &DataDir, meta: &StoreMeta, dest_abs: &Path) -> Result<Summary> {
+    let db_dest = dest_abs.join(fsutil::DB_FILE);
     let snapshot = rusqlite::Connection::open_with_flags(
         &db_dest,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -199,7 +247,7 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
                 area.as_str()
             ))
         })?;
-        let dir = shard_dir(&dest_abs, fs_area, id, &mut created)?;
+        let dir = shard_dir(dest_abs, fs_area, id, &mut created)?;
         let mut dst = create_new_file(&dir.join(fsutil::file_name(fs_area, id)))?;
         let digest = copy_hashed(&mut src, &mut dst, *size)?;
         if &digest != sha {
@@ -246,35 +294,69 @@ pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
             .as_bytes(),
     )?;
     sync_fd(&mf)?;
-    sync_tree_dirs(&created, &dest_abs)?;
+    sync_tree_dirs(&created, dest_abs)?;
     // Publish completion only after everything above is durable.
     let mut done = create_new_file(&dest_abs.join(COMPLETE))?;
     writeln!(done, "{FORMAT}")?;
     sync_fd(&done)?;
     fs::remove_file(dest_abs.join(INCOMPLETE))?;
-    sync_dir(open_dir(&dest_abs)?)?;
-    println!(
-        "backup complete: {} files, {} bytes, store {} -> {}",
-        count,
-        bytes,
-        meta.store_id,
-        dest_abs.display()
-    );
-    let (plain, sealed) = key_scheme_counts(&dest_abs.join(fsutil::DB_FILE))?;
-    if plain > 0 {
+    sync_dir(open_dir(dest_abs)?)?;
+    let (plaintext_secrets, encrypted_secrets) = key_scheme_counts(&db_dest)?;
+    Ok(Summary {
+        destination: dest_abs.to_path_buf(),
+        store_id: meta.store_id.to_string(),
+        file_count: count,
+        file_bytes: bytes,
+        plaintext_secrets,
+        encrypted_secrets,
+    })
+}
+
+/// Offline backup: the server must be stopped.
+pub fn backup(cfg: &Config, destination: &Path) -> Result<()> {
+    let dest_abs = check_destination(&cfg.data_dir, destination)?;
+    let (data, mut conn, meta, _) = open_offline(cfg, true)?;
+    // Normalize interrupted operations without inventing committed objects.
+    let recovery = with_write_tx(&mut conn, |tx| queries::recover(tx, now_ms()))?;
+    if recovery.reopened_uploads + recovery.reclaimed_writing_blobs > 0 {
         println!(
-            "WARNING: this backup contains {plain} access-key secret(s) in plaintext; protect it like a password store"
+            "recovered interrupted operations: {} uploads reopened, {} WRITING blobs reclaimed",
+            recovery.reopened_uploads, recovery.reclaimed_writing_blobs
         );
     }
-    if sealed > 0 {
-        println!(
-            "note: access keys are included, encrypted; restoring them needs the master key, which is NOT in the backup"
-        );
-    }
-    println!(
-        "note: the configuration and the master key file are not included; back them up separately"
-    );
+    begin(&dest_abs)?;
+    snapshot(&conn, &dest_abs)?;
+    finish(&data, &meta, &dest_abs)?.print();
     Ok(())
+}
+
+/// Online backup, run inside the server while it keeps serving. The pin keeps
+/// garbage collection paused, so every file the snapshot references stays in
+/// place until it is copied; uploads and deletes carry on meanwhile and are
+/// in the backup only if they committed before the snapshot. The destination
+/// is a path on the server's file system and must be absolute.
+pub fn backup_online(store: &Store, _pin: &BackupPin, destination: &Path) -> Result<Summary> {
+    if !destination.is_absolute() {
+        return Err(Error::config(
+            "an online backup destination must be an absolute path on the server",
+        ));
+    }
+    let dest_abs = check_destination(&store.config.data_dir, destination)?;
+    begin(&dest_abs)?;
+    // VACUUM INTO only reads this database, in one read transaction, but
+    // SQLite refuses it on a query_only (reader) connection.
+    let conn = metadata::open_connection(&store.data.db_path(), metadata::Role::Writer, 5000)?;
+    snapshot(&conn, &dest_abs)?;
+    drop(conn);
+    let summary = finish(&store.data, &store.meta, &dest_abs)?;
+    tracing::info!(
+        event = "backup_complete",
+        destination = %summary.destination.display(),
+        files = summary.file_count,
+        bytes = summary.file_bytes,
+        "online backup complete"
+    );
+    Ok(summary)
 }
 
 pub fn read_manifest(source: &Path) -> Result<Manifest> {

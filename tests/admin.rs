@@ -560,3 +560,34 @@ async fn cli_client_over_the_socket() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("no bucket"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cli_online_backup() {
+    let (s, admin) = setup().await;
+    admin.put("/docs/a", b"a").await;
+    let socket = s.admin_socket();
+    let dest = s.dir.path().join("nightly");
+    let run = move |dest: std::path::PathBuf, json: bool| {
+        let socket = socket.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = std::process::Command::new(BIN);
+            cmd.arg("admin").arg("--socket").arg(&socket);
+            if json {
+                cmd.arg("--json");
+            }
+            cmd.arg("backup").arg(&dest).output().unwrap()
+        })
+    };
+    let out = run.clone()(dest.clone(), false).await.unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("backup complete: 1 files"), "{stdout}");
+    assert!(dest.join("BACKUP_COMPLETE").exists());
+    let out = run(s.dir.path().join("nightly-2"), true).await.unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["file_count"], 1);
+}

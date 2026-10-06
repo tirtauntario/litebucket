@@ -962,6 +962,10 @@ The snapshot can retain GARBAGE records whose files were not copied; restore/rec
 
 Do not store the backup inside the managed object, staging, or multipart roots. A destination on the same host may be convenient for export but is not protection against host loss. Require operator documentation for moving a verified copy outside that failure domain.
 
+### 16.1a Later addition: online backup
+
+Added after the v1 baseline, on request from an application that deploys the store as a long-running container. It is not a live copy: the running server pauses garbage collection (the only remover of committed files; a pass in progress finishes first), takes one consistent SQLite snapshot with `VACUUM INTO`, and then copies and verifies exactly the files that snapshot references, which therefore cannot disappear meanwhile. The output is the same format as 16.1 and restores the same way. Interrupted-operation recovery is not run (the server already did it at startup; restore runs it again). See ADR 0005.
+
 ### 16.2 Credentials and backup secrecy
 
 The object-store backup contains object contents, metadata, and the cursor-authentication secret. It is sensitive. Protect its permissions and transport/storage appropriately.

@@ -11,8 +11,9 @@ use serde::Serialize;
 
 use super::client::AdminClient;
 use super::{
-    BucketInfo, CorsRequest, CreateBucketRequest, CreateKeyRequest, GrantJson, IssuedKey, KeyInfo,
-    QuotaRequest, RemoveGrantRequest, RotateKeyRequest, StatusInfo, UpdateKeyRequest,
+    BackupRequest, BucketInfo, CorsRequest, CreateBucketRequest, CreateKeyRequest, GrantJson,
+    IssuedKey, KeyInfo, QuotaRequest, RemoveGrantRequest, RotateKeyRequest, StatusInfo,
+    UpdateKeyRequest,
 };
 use crate::cli::{load_config, parse_duration_secs, parse_size};
 use crate::config::Overrides;
@@ -69,6 +70,12 @@ enum AdminCommand {
     Audit {
         #[arg(long, default_value_t = 50)]
         limit: usize,
+    },
+    /// Online backup into a new directory on the server's file system, while
+    /// the server keeps serving. Waits until the backup is complete.
+    Backup {
+        /// Absolute path of the new backup directory, as the server sees it.
+        destination: PathBuf,
     },
     /// OFFLINE (server stopped): create a new admin key directly in the
     /// database, for when every admin key is lost.
@@ -295,6 +302,19 @@ pub fn run(args: AdminArgs) -> Result<ExitCode> {
                     );
                 }
             })
+        }
+        AdminCommand::Backup { destination } => {
+            let destination = if destination.is_absolute() {
+                destination
+            } else {
+                std::env::current_dir()?.join(destination)
+            };
+            let s: crate::backup::Summary = c.without_read_timeout().send(
+                "POST",
+                "/v1/backup",
+                &BackupRequest { destination },
+            )?;
+            print_or_json(json, &s, crate::backup::Summary::print)
         }
         AdminCommand::Recover { .. } => unreachable!("handled above"),
     }

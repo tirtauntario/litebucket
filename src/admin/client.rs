@@ -13,13 +13,22 @@ use crate::error::{Error, Result};
 
 pub struct AdminClient {
     socket: PathBuf,
+    read_timeout: Option<Duration>,
 }
 
 impl AdminClient {
     pub fn new(socket: &Path) -> Self {
         Self {
             socket: socket.to_path_buf(),
+            read_timeout: Some(Duration::from_secs(60)),
         }
+    }
+
+    /// Wait for the answer however long it takes (an online backup answers
+    /// only when it is complete).
+    pub fn without_read_timeout(mut self) -> Self {
+        self.read_timeout = None;
+        self
     }
 
     pub fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -55,7 +64,7 @@ impl AdminClient {
                 self.socket.display()
             ))
         })?;
-        stream.set_read_timeout(Some(Duration::from_secs(60)))?;
+        stream.set_read_timeout(self.read_timeout)?;
         stream.set_write_timeout(Some(Duration::from_secs(60)))?;
         let head = format!(
             "{method} {path} HTTP/1.1\r\nHost: litebucket-admin\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",

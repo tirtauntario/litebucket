@@ -191,6 +191,7 @@ Day-to-day:
 |---|---|
 | Manage access keys and buckets | `sudo litebucket admin --config /etc/litebucket/config.toml ...` ([details](#managing-access-keys-and-buckets)) |
 | Apply config or certificate changes | `sudo systemctl restart litebucket` |
+| Online backup | `sudo litebucket admin --config /etc/litebucket/config.toml backup /srv/litebucket-backups/$(date +%Y%m%d-%H%M%S)` (directory owned by `litebucket`) |
 | Offline check, gc, backup | `sudo systemctl stop litebucket`, then `sudo -u litebucket litebucket <command> --config /etc/litebucket/config.toml` |
 
 Tip: `alias litebucket-admin='sudo litebucket admin --config /etc/litebucket/config.toml'`.
@@ -355,11 +356,19 @@ in-flight writes drain. Data lives in the named volume `litebucket-data`.
 | Lost every admin key | `docker compose stop && docker compose run --rm litebucket admin recover`, then `docker compose start` |
 | Backup | see below |
 
-Backups are offline. Stop the service, then write the backup to a host
-directory owned by uid 65532:
+Online backups run while the service keeps serving. Mount a host directory
+owned by uid 65532 into the container (for example add
+`- /srv/litebucket-backups:/backup` to the service's `volumes` in
+`compose.yaml`), then:
 
 ```sh
 sudo install -d -o 65532 -g 65532 -m 0700 /srv/litebucket-backups
+docker compose exec litebucket litebucket admin backup /backup/$(date +%Y%m%d-%H%M%S)
+```
+
+Offline backups need the service stopped:
+
+```sh
 docker compose stop
 docker compose run --rm -v /srv/litebucket-backups:/backup litebucket \
   backup --destination /backup/$(date +%Y%m%d-%H%M%S)

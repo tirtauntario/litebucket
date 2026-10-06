@@ -277,6 +277,102 @@ async fn ops_05_backup_and_restore_round_trip() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn online_backup_pauses_gc_and_restores_while_serving() {
+    let (mut s, c) = setup_with("[maintenance]\ngarbage_grace_seconds = 0\n").await;
+    let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    c.put("/docs/big.bin", &big).await;
+    for i in 0..20 {
+        c.put(&format!("/docs/k{i}"), format!("v0-{i}").as_bytes())
+            .await;
+    }
+    let store = s.store();
+    let objects = s.data_dir().join("objects");
+
+    // While a backup holds its pin, garbage stays on disk; one backup at a time.
+    let pin = store.pin_for_backup().await.unwrap();
+    assert!(matches!(
+        store.pin_for_backup().await,
+        Err(litebucket::error::Error::Conflict(_))
+    ));
+    let before = files_under(&objects).len();
+    c.delete("/docs/k0").await;
+    assert_eq!(litebucket::maintenance::gc_once(&store).await.unwrap(), 0);
+    assert_eq!(files_under(&objects).len(), before);
+    drop(pin);
+    assert_eq!(litebucket::maintenance::gc_once(&store).await.unwrap(), 1);
+
+    // Overwrites, deletes and collection carry on during the backup.
+    let churn = {
+        let c = s.admin();
+        let store = store.clone();
+        tokio::spawn(async move {
+            for round in 1..=8 {
+                for i in 1..20 {
+                    c.put(&format!("/docs/k{i}"), format!("v{round}-{i}").as_bytes())
+                        .await;
+                }
+                c.delete(&format!("/docs/k{round}")).await;
+                litebucket::maintenance::gc_once(&store).await.unwrap();
+            }
+        })
+    };
+    let dest = s.dir.path().join("online-1");
+    let summary = s
+        .admin_api(
+            "POST",
+            "/v1/backup",
+            serde_json::json!({ "destination": dest }),
+        )
+        .await
+        .unwrap();
+    churn.await.unwrap();
+    assert!(dest.join("BACKUP_COMPLETE").exists());
+    assert!(!dest.join("BACKUP_INCOMPLETE").exists());
+    assert!(summary["file_count"].as_u64().unwrap() >= 2, "{summary}");
+    assert_eq!(summary["destination"], dest.to_str().unwrap());
+    // A relative or existing destination is refused, and the pin released.
+    let err = s
+        .admin_api(
+            "POST",
+            "/v1/backup",
+            serde_json::json!({ "destination": "relative" }),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.contains("absolute"), "{err}");
+    let err = s
+        .admin_api(
+            "POST",
+            "/v1/backup",
+            serde_json::json!({ "destination": dest }),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.contains("already exists"), "{err}");
+    drop(store.pin_for_backup().await.unwrap());
+
+    // The backup restores to a store that serves a consistent state.
+    s.stop().await;
+    let restored = s.dir.path().join("restored");
+    let key = s.dir.path().join("master.key");
+    litebucket::backup::restore(&dest, &restored, Some(&key), false).unwrap();
+    let text = std::fs::read_to_string(&s.config_path)
+        .unwrap()
+        .replace("data_dir = \"./data\"", "data_dir = \"./restored\"");
+    std::fs::write(&s.config_path, text).unwrap();
+    s.boot().await;
+    let c = s.admin();
+    assert_eq!(c.get("/docs/big.bin", "").await.body, big);
+    assert_eq!(c.get("/docs/k0", "").await.status, 404);
+    for i in 9..20 {
+        let body = c.get(&format!("/docs/k{i}"), "").await.text();
+        let (version, key) = body.split_once('-').unwrap();
+        assert!(version.starts_with('v'), "{body}");
+        assert_eq!(key, i.to_string());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn doctor_reports_consistency_and_untracked_files() {
     let (mut s, c) = setup_with("").await;
     c.put("/docs/a", b"a").await;
