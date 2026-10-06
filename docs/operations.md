@@ -33,7 +33,9 @@ Transport rules enforced at startup:
 
 - Non-loopback plaintext is refused unless `trusted_proxy_mode = true` with a
   non-empty `trusted_proxy_addresses` (connections from other peers are
-  dropped). Forwarded headers are never trusted; a proxy must preserve `Host`,
+  dropped). Each entry is an address (`10.0.0.5`) or a range in CIDR notation
+  (`172.18.0.0/16`, written at its network address); IPv4-mapped IPv6 peers
+  match IPv4 entries. Forwarded headers are never trusted; a proxy must preserve `Host`,
   the raw path/query, and the body (no normalization, decompression, trailer
   stripping, or full buffering).
 - Loopback plaintext requires `allow_insecure_loopback_http = true`.

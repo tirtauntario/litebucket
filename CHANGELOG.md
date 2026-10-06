@@ -10,6 +10,8 @@ First public release (0.1.0).
 
 ### Added
 
+- `http.trusted_proxy_addresses` takes ranges in CIDR notation as well as
+  addresses, for applications in containers whose addresses change.
 - S3-compatible API: path-style addressing, SigV4 header and presigned
   authentication, all SDK payload modes including checksum trailers,
   CRC32/CRC32C/CRC64NVME/SHA1/SHA256 and Content-MD5 verification.

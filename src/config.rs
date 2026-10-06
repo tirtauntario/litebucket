@@ -86,13 +86,76 @@ impl Default for AdminConfig {
     }
 }
 
+/// A trusted-proxy peer: one address, or a range in CIDR notation. Container
+/// platforms give peers new addresses on every restart, so a range (the
+/// container network's) is often the only stable description of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrustedPeer {
+    network: std::net::IpAddr,
+    prefix: u8,
+}
+
+impl TrustedPeer {
+    /// Parses `10.0.0.5`, `10.0.0.0/8`, `fd00::1` or `fd00::/8`. The range
+    /// must be written at its network address (`10.0.0.0/8`, not
+    /// `10.1.2.3/8`), so a typo cannot silently widen it.
+    pub fn parse(s: &str) -> Result<Self> {
+        let invalid = || Error::config(format!("invalid trusted proxy address or range: {s}"));
+        let (addr, prefix) = match s.trim().split_once('/') {
+            Some((addr, prefix)) => (addr, Some(prefix.parse::<u8>().map_err(|_| invalid())?)),
+            None => (s.trim(), None),
+        };
+        let network: std::net::IpAddr = addr.parse().map_err(|_| invalid())?;
+        let network = network.to_canonical();
+        let max = if network.is_ipv4() { 32 } else { 128 };
+        let prefix = prefix.unwrap_or(max);
+        if prefix > max {
+            return Err(invalid());
+        }
+        let peer = Self { network, prefix };
+        if peer.masked(network) != network {
+            return Err(Error::config(format!(
+                "trusted proxy range {s} has host bits set; write it at its network address"
+            )));
+        }
+        Ok(peer)
+    }
+
+    fn masked(&self, ip: std::net::IpAddr) -> std::net::IpAddr {
+        match ip {
+            std::net::IpAddr::V4(v4) => {
+                let bits = u32::from(v4);
+                let mask = u32::MAX
+                    .checked_shl(32 - u32::from(self.prefix))
+                    .unwrap_or(0);
+                std::net::IpAddr::V4((bits & mask).into())
+            }
+            std::net::IpAddr::V6(v6) => {
+                let bits = u128::from(v6);
+                let mask = u128::MAX
+                    .checked_shl(128 - u32::from(self.prefix))
+                    .unwrap_or(0);
+                std::net::IpAddr::V6((bits & mask).into())
+            }
+        }
+    }
+
+    /// Whether `ip` (an IPv4-mapped IPv6 address counts as IPv4) is this
+    /// address or inside this range.
+    pub fn contains(&self, ip: std::net::IpAddr) -> bool {
+        let ip = ip.to_canonical();
+        ip.is_ipv4() == self.network.is_ipv4() && self.masked(ip) == self.network
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct HttpConfig {
     pub listen: String,
     pub allow_insecure_loopback_http: bool,
     pub trusted_proxy_mode: bool,
-    /// Peer addresses allowed to connect in trusted-proxy mode.
+    /// Peers allowed to connect in trusted-proxy mode: addresses
+    /// (`10.0.0.5`) or ranges in CIDR notation (`172.18.0.0/16`).
     pub trusted_proxy_addresses: Vec<String>,
     pub max_header_bytes: usize,
     pub max_header_count: usize,
@@ -395,14 +458,11 @@ impl Config {
         self.http.tls_certificate_file.is_some()
     }
 
-    pub fn trusted_proxy_peers(&self) -> Result<Vec<std::net::IpAddr>> {
+    pub fn trusted_proxy_peers(&self) -> Result<Vec<TrustedPeer>> {
         self.http
             .trusted_proxy_addresses
             .iter()
-            .map(|s| {
-                s.parse()
-                    .map_err(|_| Error::config(format!("invalid trusted proxy address: {s}")))
-            })
+            .map(|s| TrustedPeer::parse(s))
             .collect()
     }
 
@@ -770,6 +830,30 @@ mod tests {
         assert!(c.validate().is_err(), "proxy mode needs peers");
         c.http.trusted_proxy_addresses = vec!["10.0.0.5".into()];
         c.validate().unwrap();
+        c.http.trusted_proxy_addresses = vec!["172.18.0.0/16".into(), "fd00::/8".into()];
+        c.validate().unwrap();
+        c.http.trusted_proxy_addresses = vec!["172.18.0.1/16".into()];
+        assert!(c.validate().is_err(), "host bits set");
+        c.http.trusted_proxy_addresses = vec!["10.0.0.0/33".into()];
+        assert!(c.validate().is_err(), "prefix too long");
+    }
+
+    #[test]
+    fn trusted_peers_match_addresses_and_ranges() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        let one = TrustedPeer::parse("10.0.0.5").unwrap();
+        assert!(one.contains(ip("10.0.0.5")) && !one.contains(ip("10.0.0.6")));
+        let net = TrustedPeer::parse("172.18.0.0/16").unwrap();
+        assert!(net.contains(ip("172.18.4.20")));
+        assert!(
+            net.contains(ip("::ffff:172.18.4.20")),
+            "IPv4-mapped peers count as IPv4"
+        );
+        assert!(!net.contains(ip("172.19.0.1")) && !net.contains(ip("fd00::1")));
+        let v6 = TrustedPeer::parse("fd00::/8").unwrap();
+        assert!(v6.contains(ip("fd12::3")) && !v6.contains(ip("fe80::1")));
+        let all = TrustedPeer::parse("0.0.0.0/0").unwrap();
+        assert!(all.contains(ip("8.8.8.8")) && !all.contains(ip("::1")));
     }
 
     #[test]

@@ -47,7 +47,7 @@ tls_private_key_file = "/run/secrets/litebucket-tls.key"
 # comment out the two tls_* lines above and set both of these. Only the listed
 # peer IPs may connect; X-Forwarded-* headers are never trusted.
 # trusted_proxy_mode = false
-# trusted_proxy_addresses = []          # e.g. ["172.18.0.10"]
+# trusted_proxy_addresses = []          # e.g. ["172.18.0.10", "172.18.0.0/16"]
 
 # Plain HTTP on 127.0.0.1 only (local development).
 # allow_insecure_loopback_http = false

@@ -559,7 +559,13 @@ your proxy with the clients you use before relying on it.
 
 **Reverse proxy on another host.** Set `http.trusted_proxy_mode = true` and
 list the proxy's IP addresses in `http.trusted_proxy_addresses`. Connections
-from any other peer are dropped. Forwarded headers are never trusted. See
+from any other peer are dropped.
+
+**Applications in containers** (Docker, Kamal) get new addresses on every
+restart, so list their network's range instead, e.g.
+`trusted_proxy_addresses = ["172.18.0.0/16"]` (`docker network inspect`
+shows it). Every container on that network can then connect without TLS;
+keep untrusted containers off it. Forwarded headers are never trusted. See
 [operations.md](operations.md#configuration).
 
 ## Upgrading

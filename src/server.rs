@@ -2,7 +2,7 @@
 //! management endpoint (`/livez`, `/readyz`, `/metrics`), and the local admin
 //! API socket, plus graceful shutdown.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -69,7 +69,7 @@ pub fn s3_router(store: Arc<Store>) -> Router {
 pub async fn start(store: Arc<Store>) -> Result<Running> {
     let cfg = store.config.clone();
     let tls = load_tls(&cfg)?;
-    let allowed_peers: Option<Vec<IpAddr>> = cfg
+    let allowed_peers: Option<Vec<crate::config::TrustedPeer>> = cfg
         .http
         .trusted_proxy_mode
         .then(|| cfg.trusted_proxy_peers())
@@ -119,7 +119,7 @@ pub async fn start(store: Arc<Store>) -> Result<Running> {
                         }
                     };
                     if let Some(peers) = &allowed_peers
-                        && !peers.contains(&peer.ip())
+                        && !peers.iter().any(|p| p.contains(peer.ip()))
                     {
                         tracing::warn!(event = "rejected_peer", "connection from a non-proxy peer refused");
                         continue;

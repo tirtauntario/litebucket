@@ -44,7 +44,7 @@ allow_insecure_loopback_http = true
 # Or serve plain HTTP behind a TLS-terminating proxy on another host. Only the
 # listed peer IPs may connect; X-Forwarded-* headers are never trusted.
 # trusted_proxy_mode = false
-# trusted_proxy_addresses = []          # e.g. ["10.0.0.5"]
+# trusted_proxy_addresses = []          # e.g. ["10.0.0.5", "172.18.0.0/16"]
 
 # Request limits.
 # max_header_bytes = 32768              # 8 KiB .. 1 MiB

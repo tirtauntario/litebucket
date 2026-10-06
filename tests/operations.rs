@@ -502,6 +502,23 @@ async fn trusted_proxy_mode_refuses_other_peers() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn trusted_proxy_range_admits_its_peers() {
+    // A container network's range: 127.0.0.1 is inside 127.0.0.0/8.
+    let s = TestServer::start_with(
+        "[http]\nlisten = \"127.0.0.1:0\"\ntrusted_proxy_mode = true\ntrusted_proxy_addresses = [\"10.9.8.7\", \"127.0.0.0/8\"]\n",
+    )
+    .await;
+    let mut t = tcp_connect(&s.base);
+    let _ = write!(t, "GET / HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+    let mut resp = String::new();
+    let _ = t.read_to_string(&mut resp);
+    assert!(
+        resp.starts_with("HTTP/1.1 "),
+        "a peer in the range gets an answer: {resp}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn db_04_missing_or_newer_metadata_never_opens_an_empty_store() {
     let (mut s, c) = setup_with("").await;
     c.put("/docs/a", b"a").await;
