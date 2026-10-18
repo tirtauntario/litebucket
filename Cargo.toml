@@ -67,3 +67,11 @@ tempfile = "3"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[profile.dev]
+# file:line in backtraces, without full variable info: a much smaller target/.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# No debug info for dependencies.
+debug = false
