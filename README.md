@@ -4,35 +4,31 @@
 [![Release](https://img.shields.io/github/v/release/tirtauntario/litebucket?sort=semver)](https://github.com/tirtauntario/litebucket/releases)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-A compact, single-host, S3-compatible object store written in Rust. Metadata
-lives in embedded SQLite (WAL, `synchronous=FULL`). Object bytes live in
-immutable files sharded as `area/aa/bb/<id>`. It runs as one process with one
-data directory, with no external database or worker service.
+A small S3-compatible object store for one server. One binary, one data
+directory, no database server or other services to run. Your application
+talks to it with a normal S3 client, so you can move to AWS S3 later by
+changing the endpoint and keys.
 
-Use it when an application needs S3-style storage (Rails Active Storage,
-uploads, backups, build artifacts) on a single server, and you want something
-small, durable, and easy to back up.
+- **Works with standard S3 clients.** Tested with the AWS CLI v2, Boto3, the
+  Ruby SDK, Rails Active Storage and browser uploads through presigned URLs.
+  It covers the operations applications use: buckets, upload, download,
+  delete, copy, listing, multipart uploads, range and conditional requests,
+  CORS, and checksums (CRC32, CRC32C, CRC64NVME, SHA1, SHA256, Content-MD5).
+- **Safe writes.** A write is confirmed only after the data is flushed to disk
+  and recorded in the metadata database (embedded SQLite). Crash recovery is
+  tested at every step.
+- **Access keys managed at runtime.** `litebucket admin` creates, scopes (per
+  bucket and key prefix), rotates (with a grace period) and revokes keys.
+  Changes apply to the next request, with no restart. Secrets are stored
+  encrypted and every change is logged. There is no anonymous access.
+- **Simple to operate.** Health checks, Prometheus metrics, per-bucket quotas,
+  offline checks and garbage collection, and verified backup and restore
+  (online or offline).
+- **Small.** A single binary of about 7 MB, a 64 MB container image, and
+  under 10 MiB of memory while streaming a 1 GiB object
+  ([benchmarks](docs/benchmarks.md)).
 
-- **S3 API:** path-style addressing and SigV4 (header and presigned URLs). All
-  SDK payload modes, including checksum trailers, are supported. Checksums:
-  CRC32, CRC32C, CRC64NVME, SHA1, SHA256 and Content-MD5. Operations:
-  multipart uploads, CopyObject, DeleteObjects, ListObjectsV2, conditional
-  reads/writes, ranges and CORS.
-- **Durable by construction:** before any write is acknowledged, it is
-  fsynced, published with a no-clobber rename, directory-synced and committed
-  in SQLite. Crash recovery is tested at every durable boundary.
-- **Access keys managed at runtime:** `litebucket admin` creates, scopes
-  (per bucket and key prefix), rotates (with a grace period) and revokes keys
-  through a local admin API; changes apply to the next request. Secrets are
-  stored encrypted (AES-256-GCM) under a master key, with an audit log.
-  Private by default.
-- **Operations:** offline `doctor`, `check --full`, `gc`, per-bucket quotas,
-  and verifiable backup/restore.
-
-Tested against AWS CLI v2, Boto3, the Ruby SDK, Rails Active Storage and
-Chrome (see [docs/compatibility.md](docs/compatibility.md)). It is **not** a
-full Amazon S3 replacement: unsupported features are rejected explicitly, never
-silently ignored. There is no replication or high availability.
+Unsupported S3 features are rejected with an error, never silently ignored.
 
 ## Why litebucket
 
@@ -47,6 +43,34 @@ is more than I need when everything runs on one host.
 
 litebucket is the drop-in for that case: one binary, one data directory, no
 other services to run.
+
+## Is it for you?
+
+**A good fit if:**
+
+- an application on one server needs S3-style storage: uploads, attachments,
+  images, documents, backups, build artifacts;
+- you want development, staging or a small production setup to use the same
+  S3 code you would use with AWS S3;
+- you want storage you can run, back up and restore as one directory on one
+  Linux host (or in one Docker container).
+
+**Not a fit if you need:**
+
+- high availability, replication or more than one node. litebucket runs on
+  one host, and your data is as safe as that host's disk and your backups;
+- object versioning, Object Lock or retention, lifecycle rules, bucket
+  policies, IAM or STS, event notifications, or static website hosting;
+- server-side encryption. Objects are stored as uploaded; use an encrypted
+  volume if you need encryption at rest;
+- virtual-hosted-style addressing (`bucket.host`). Only path-style
+  (`host/bucket/key`) works;
+- a data directory on NFS, SMB or another shared volume, or to run natively on
+  Windows.
+
+[docs/compatibility.md](docs/compatibility.md) lists every supported
+operation, header and checksum, the tested client versions, and where
+litebucket differs from S3.
 
 ## Install
 
@@ -102,7 +126,9 @@ manual steps, real certificates and upgrades.
 
 ## Quick start (standalone, local only)
 
-This setup serves plain HTTP on `127.0.0.1` for local testing only.
+This setup serves plain HTTP on `127.0.0.1` for local testing only. It needs
+the `litebucket` binary ([Install](#install)) and, for the example commands,
+the [AWS CLI](https://aws.amazon.com/cli/).
 
 ```sh
 mkdir litebucket && cd litebucket
@@ -186,17 +212,28 @@ const s3 = new S3Client({
 
 ## Documentation
 
+[docs/README.md](docs/README.md) lists every document. The ones you need to
+run litebucket:
+
 | Document | Contents |
 |---|---|
 | [docs/installation.md](docs/installation.md) | Install, run as a systemd service or in Docker, manage access keys and buckets, TLS, upgrades |
-| [docs/operations.md](docs/operations.md) | Configuration reference, admin API, health checks, failure handling, backup/restore |
-| [docs/compatibility.md](docs/compatibility.md) | Supported S3 operations, tested client versions, deviations |
-| [SECURITY.md](SECURITY.md) | Security model and how to report vulnerabilities |
-| [docs/benchmarks.md](docs/benchmarks.md) | Measured resource use and throughput |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, pull requests |
-| [docs/releasing.md](docs/releasing.md) | How releases are built and published (maintainers) |
-| [docs/SPEC.md](docs/SPEC.md) | The original design specification |
-| [docs/implementation-report.md](docs/implementation-report.md), [docs/test-evidence.md](docs/test-evidence.md), [docs/architecture-decisions/](docs/architecture-decisions/) | Design decisions and test evidence |
+| [docs/operations.md](docs/operations.md) | Configuration, admin API, health checks, failure handling, backup and restore |
+| [docs/compatibility.md](docs/compatibility.md) | Supported S3 operations, tested client versions, differences from S3 |
+| [docs/benchmarks.md](docs/benchmarks.md) | Measured memory use and throughput |
+
+## Contributing
+
+Bug reports, compatibility reports and pull requests are welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) first: litebucket is deliberately small,
+so larger changes start with an issue. Questions go to
+[Discussions](https://github.com/tirtauntario/litebucket/discussions). This
+project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Report vulnerabilities privately, not in public issues. See
+[SECURITY.md](SECURITY.md) for how to report and for the security model.
 
 ## License
 
