@@ -12,7 +12,7 @@ are developer-machine measurements, not capacity claims.
 | macOS | macOS 26.5.2, Apple Silicon arm64, 8 CPUs, 16 GiB RAM, internal SSD (APFS, ~95% full). Durable syncs use `F_FULLFSYNC` (drive cache flush). |
 | Linux | Docker Desktop VM, kernel 7.0.12-linuxkit aarch64 on the same Mac; data on an ext4 volume; `fsync`. |
 
-## Memory and descriptors (PERF-01, CAP-01) — `scripts/bench.py`, macOS, release build
+## Memory and file descriptors — `scripts/bench.py`, macOS, release build
 
 | Scenario | Wall time | Peak server RSS | Peak FDs |
 |---|---:|---:|---:|
@@ -37,7 +37,7 @@ LTO); the container image is 64.3 MB.
 
 History of the PUT figure (Linux): 794/s with group commit but a staging-
 directory sync at file creation; 1406/s after removing that unnecessary sync
-(ADR 0002). On macOS each PUT still pays three `F_FULLFSYNC`s for the file and
+([ADR 0002](architecture-decisions/0002-durable-publication-and-locking.md)). On macOS each PUT still pays three `F_FULLFSYNC`s for the file and
 directories plus its share of WAL syncs; each one flushes the whole drive
 cache, so macOS numbers are bounded by the device, not by litebucket. With
 Boto3 as the client (Python, 16 threads, one session per thread) the macOS
@@ -62,6 +62,11 @@ After ~32k objects and ~3 GiB of data: metadata database 12.3 MB, WAL 4.3 MB
 (passive checkpoints every 60 s; truncating checkpoint at clean shutdown).
 
 ## Reproduce
+
+Run these from a clone of the repository. `scripts/bench.py` needs a Python
+virtual environment at `.interop/venv` with `boto3` installed (see
+[CONTRIBUTING.md](../CONTRIBUTING.md#development-setup)); the last command runs
+the small-object load test on Linux in Docker.
 
 ```sh
 cargo build --release

@@ -2,8 +2,14 @@
 
 litebucket implements a scoped subset of the Amazon S3 API for single-host
 application storage. It is **not** a full S3 replacement. Everything below is
-backed by executed tests (see `docs/test-evidence.md`); anything not listed is
+backed by executed tests (see [test-evidence.md](test-evidence.md)); anything not listed is
 unsupported and is rejected explicitly rather than ignored.
+
+Terms: *path-style* means the bucket is the first part of the URL path
+(`https://host:port/bucket/key`). *SigV4* is AWS Signature Version 4, the
+request-signing scheme every current AWS SDK uses. *Presigned URL* is a URL
+that carries its own signature, so a browser or another program can use it
+without keys.
 
 ## Addressing, transport, and authentication
 
@@ -32,7 +38,7 @@ unsupported and is rejected explicitly rather than ignored.
 | ListObjectsV2 | supported | `prefix`, `delimiter`, `max-keys` (≤ 1000), `start-after`, `continuation-token`, `encoding-type=url`, `fetch-owner`. |
 | CreateMultipartUpload / UploadPart / CompleteMultipartUpload / AbortMultipartUpload / ListParts / ListMultipartUploads | supported | 1–10,000 parts, 5 MiB minimum for non-final parts, 5 GiB maximum part, 100 GiB assembled object (configurable). |
 | PutBucketCors / GetBucketCors / DeleteBucketCors / CORS preflight | supported | ≤ 100 rules, 64 KiB body; preflight is unsigned and never mutates. |
-| ListObjects (v1) | **rejected** (`NotImplemented`) | Deferred by the spec; no tested client needed it (Rails `delete_prefixed` uses ListObjectsV2). |
+| ListObjects (v1) | **rejected** (`NotImplemented`) | Deferred by the [spec](SPEC.md); no tested client needed it (Rails `delete_prefixed` uses ListObjectsV2). |
 | UploadPartCopy, GetObjectAttributes, object tagging, ACL APIs, versioning, Object Lock, retention, legal hold, lifecycle, website, policy, encryption, replication, notifications, presigned POST | **rejected** | `NotImplemented` (or a more specific error) before any mutation. |
 
 ## Integrity: payload modes and checksums
@@ -86,8 +92,8 @@ modes are covered by AWS-published signature vectors and wire fixtures.
 | Ranged and `partNumber` GETs omit whole-object checksum headers. | A whole-object checksum must not appear to authenticate a partial body. |
 | Missing `Content-Length` without `Transfer-Encoding` means an empty body; chunked transfer without `Content-Length` or `x-amz-decoded-content-length` → `MissingContentLength` (411). | HTTP/1.1 semantics; S3 also requires a length. |
 | Unknown `x-amz-*` headers and unknown query parameters are rejected (`NotImplemented` / `InvalidArgument`). | Fail closed rather than ignore semantics; `x-id` and SigV4 query parameters are allowlisted. |
-| Logical byte quota per bucket (`QuotaExceeded`, 403) set through the local admin API (`litebucket admin bucket set-quota`); no S3 quota API. | Spec §13.3. |
-| Access keys are created, scoped, rotated and revoked through the local admin API and stored in the metadata database (spec: a separate operator-managed credentials file). There is no IAM/STS API. | ADR 0004. |
+| Logical byte quota per bucket (`QuotaExceeded`, 403) set through the local admin API (`litebucket admin bucket set-quota`); no S3 quota API. | [Spec](SPEC.md) §13.3. |
+| Access keys are created, scoped, rotated and revoked through the local admin API and stored in the metadata database (spec: a separate operator-managed credentials file). There is no IAM/STS API. | [ADR 0004](architecture-decisions/0004-access-keys-in-sqlite-and-admin-api.md). |
 | Disk-reserve or temporary-space exhaustion → `ServiceUnavailable` (503, retryable); admission/queue timeouts → `SlowDown` (503). | Retryable overload signals. |
 | Multi-page listings are not a single snapshot. | Each page is one short read transaction; concurrent changes can affect later pages. |
 | Bucket names are unique within this service only. | Not a global namespace. |

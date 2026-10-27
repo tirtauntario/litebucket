@@ -3,14 +3,15 @@
 ## Deployment model
 
 - One `litebucket` process per data directory, on one host, on a **local**
-  filesystem (validated: APFS on macOS for development; ext4 on Linux for the
+  filesystem (tested: APFS on macOS for development; ext4 on Linux for the
   authoritative test run). NFS/SMB/shared multi-host volumes are unsupported.
 - The data directory holds everything: `store.lock`, `metadata.sqlite3`
   (+ SQLite-managed `-wal`/`-shm`), and the sharded `objects/`, `staging/`,
   `multipart/` areas (`area/aa/bb/<32-hex-id>`). All three areas must be on the
   same device; startup refuses otherwise.
-- No PostgreSQL, Redis, or worker containers. Background work (GC, expiry,
-  checkpoints) runs inside the process.
+- No PostgreSQL, Redis, or worker containers. Background work (garbage
+  collection, or GC; upload expiry; SQLite checkpoints) runs inside the
+  process.
 - Never run two processes against the same data directory. The exclusive
   `flock` on `store.lock` refuses a second `serve` or any offline command
   while the server runs. Do not delete `store.lock`, `metadata.sqlite3-wal`, or
@@ -20,7 +21,8 @@
 
 `litebucket config template` prints a commented file listing every setting
 with its default (`--docker` for the container layout; sources:
-`docs/examples/config.example.toml`, `deploy/config.toml`). Unknown keys are
+[`examples/config.example.toml`](examples/config.example.toml),
+[`deploy/config.toml`](../deploy/config.toml)). Unknown keys are
 errors. Relative paths resolve against the config file's directory. Byte
 values are integers (`_bytes`), durations carry units (`_seconds`, `_ms`).
 
@@ -138,8 +140,9 @@ operator decision. Exit codes: `0` OK, `2` problems found, `1` error,
 
 Startup: validate config → lock → validate ownership/permissions/same device →
 open metadata (refuses a missing database in a non-empty directory, newer
-schemas, and failed `quick_check`) → apply migrations → recovery (WRITING
-blobs become garbage, COMPLETING uploads reopen) → convert stored secrets to
+schemas, and failed `quick_check`) → apply migrations → recovery (files of
+writes that never committed become garbage for GC; interrupted multipart
+completions are reopened) → convert stored secrets to
 the configured protection mode and load access keys (refused if any cannot be
 decrypted or none is enabled) → start workers, the management listener and
 the admin socket → bind S3 → ready.

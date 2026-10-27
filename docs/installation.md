@@ -174,8 +174,8 @@ sudo -u litebucket litebucket init --config /etc/litebucket/config.toml
 ```
 
 **6. Install and start the unit.** The unit file is
-[`deploy/litebucket.service`](../deploy/litebucket.service) (also in the release
-archive).
+[`deploy/litebucket.service`](../deploy/litebucket.service). It is also in the
+release archive; run the commands below from the directory that contains it.
 
 ```sh
 sudo install -m 0644 litebucket.service /etc/systemd/system/litebucket.service
