@@ -14,6 +14,10 @@ RUN cargo build --release --locked \
  && install -d -m 0700 /out/data
 
 FROM gcr.io/distroless/cc-debian13:nonroot
+LABEL org.opencontainers.image.title="litebucket" \
+      org.opencontainers.image.description="Single-host S3-compatible object storage" \
+      org.opencontainers.image.source="https://github.com/tirtauntario/litebucket" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0"
 COPY --from=build /src/target/release/litebucket /usr/local/bin/litebucket
 COPY --from=build --chown=65532:65532 /out/data /data
 USER 65532:65532

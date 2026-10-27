@@ -61,7 +61,7 @@ archives:
 | `litebucket-vX.Y.Z-x86_64-apple-darwin.tar.gz` | macOS Intel |
 
 Each archive contains the binary, the example config file, the systemd unit,
-the license and the changelog.
+the license files (MIT and Apache-2.0) and the changelog.
 
 ```sh
 v=v0.1.0; t=x86_64-unknown-linux-musl

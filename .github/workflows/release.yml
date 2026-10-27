@@ -63,7 +63,7 @@ jobs:
           name="litebucket-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/litebucket" "dist/$name/"
-          cp LICENSE README.md CHANGELOG.md "dist/$name/"
+          cp LICENSE-MIT LICENSE-APACHE README.md CHANGELOG.md "dist/$name/"
           cp docs/examples/config.example.toml "dist/$name/"
           cp deploy/litebucket.service "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
@@ -123,6 +123,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          # GitHub cannot detect a dual license, so set it explicitly.
+          labels: |
+            org.opencontainers.image.licenses=MIT OR Apache-2.0
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
