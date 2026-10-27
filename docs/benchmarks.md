@@ -73,6 +73,6 @@ cargo build --release
 .interop/venv/bin/python scripts/bench.py --large-mib 1024 --small-count 2000
 cargo run --release --example load -- 1600 16
 docker run --rm -v "$PWD":/src:ro -v litebucket-linux-target:/target -v litebucket-linux-tmp:/tmp \
-  -e CARGO_TARGET_DIR=/target -w /src rust:1.97.1-slim-trixie \
+  -e CARGO_TARGET_DIR=/target -w /src rust:1.99.0-slim-trixie \
   cargo run --release --locked --example load -- 1600 16
 ```

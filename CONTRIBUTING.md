@@ -34,7 +34,7 @@ Docker image. Linux results are authoritative for durability behavior. On
 macOS, you can run the suite in a container:
 
 ```sh
-docker run --rm -v "$PWD":/src -w /src rust:1.97.1-slim-trixie \
+docker run --rm -v "$PWD":/src -w /src rust:1.99.0-slim-trixie \
   cargo test --locked --features failpoints
 ```
 
