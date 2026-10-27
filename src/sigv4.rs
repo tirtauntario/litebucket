@@ -4,7 +4,7 @@
 //! byte is URI-encoded once, query parameters are decoded then re-encoded and
 //! sorted. Signatures are compared in constant time.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
