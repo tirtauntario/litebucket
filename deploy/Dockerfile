@@ -2,7 +2,7 @@
 # Multi-stage build. The runtime image is distroless (glibc + CA certs, no
 # shell or package manager), runs as a non-root user, and has one writable
 # volume. TLS uses rustls/ring, so no OpenSSL is needed at runtime.
-FROM rust:1.97.1-slim-trixie AS build
+FROM rust:1.99.0-slim-trixie AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src src
