@@ -6,7 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-First public release (0.1.0).
+## [0.1.0] - 2026-10-27
+
+First public release.
 
 ### Added
 
@@ -51,4 +53,5 @@ First public release (0.1.0).
   (`deploy/setup.sh`) and a systemd unit.
 - Dual license: MIT OR Apache-2.0.
 
-[Unreleased]: https://github.com/tirtauntario/litebucket/commits/main
+[Unreleased]: https://github.com/tirtauntario/litebucket/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/tirtauntario/litebucket/releases/tag/v0.1.0
