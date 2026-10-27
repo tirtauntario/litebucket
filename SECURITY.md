@@ -1,6 +1,32 @@
-# Security model
+# Security policy
 
-## What litebucket protects
+## Reporting a vulnerability
+
+Do not open a public issue, discussion or pull request for a security
+problem. Report it privately through
+[GitHub private vulnerability reporting](https://github.com/tirtauntario/litebucket/security/advisories/new).
+
+Include:
+
+- the version (`litebucket --version`, or the image tag) and platform;
+- the relevant configuration, **without secrets**;
+- steps to reproduce, and the impact you expect;
+- a proof of concept, if you have one.
+
+litebucket has one maintainer, so responses are best effort. You should get
+an acknowledgement within a few days and an assessment after that. Fixes
+are released with a GitHub security advisory that credits the reporter,
+unless you ask not to be credited. Please keep the issue private until a fix
+is released.
+
+## Supported versions
+
+Security fixes go into the latest release only. Upgrade to the newest version
+before you report an issue, if you can.
+
+## Security model
+
+### What litebucket protects
 
 - **Authentication:** every S3 request except a CORS preflight must carry a
   valid AWS SigV4 signature (header or presigned query) from an enabled,
@@ -47,7 +73,7 @@
 - **Logs and metrics** never contain secrets, signatures, presigned URLs,
   request bodies, custom metadata, or (by default) object keys.
 
-## What it does not protect
+### What it does not protect
 
 - Data at rest is stored in plaintext; use filesystem/volume encryption if
   required.
@@ -62,22 +88,3 @@
   run code as the service user, can recover every secret.
 - No replication or high availability; durability depends on the storage
   device honoring `fsync`.
-
-## Supported versions
-
-Security fixes go into the latest release. Upgrade to the newest version
-before you report an issue, if you can.
-
-## Reporting a vulnerability
-
-Do not open a public issue. Report it privately through
-[GitHub private vulnerability reporting](https://github.com/tirtauntario/litebucket/security/advisories/new).
-Include:
-
-- the version (`litebucket --version`) and platform;
-- the relevant configuration, **without secrets**;
-- steps to reproduce, and the impact you expect.
-
-You should get an acknowledgement within a few days. Fixes are released with
-a GitHub security advisory that credits the reporter, unless you ask not to
-be credited.

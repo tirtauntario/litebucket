@@ -1,0 +1,28 @@
+# Weekly dependency updates, one grouped pull request per ecosystem.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # The rust build image should match the toolchain in rust-toolchain.toml;
+  # bump both together.
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+    groups:
+      docker:
+        patterns: ["*"]

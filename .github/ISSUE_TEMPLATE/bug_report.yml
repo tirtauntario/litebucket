@@ -5,7 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Do not report security vulnerabilities here. See SECURITY.md.
+        Do not report security vulnerabilities here. See [SECURITY.md](https://github.com/tirtauntario/litebucket/blob/main/SECURITY.md).
+        For setup questions, use [Discussions](https://github.com/tirtauntario/litebucket/discussions).
         Never paste secrets, credentials files, presigned URLs or signatures.
   - type: input
     id: version

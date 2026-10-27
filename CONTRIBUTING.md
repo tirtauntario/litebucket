@@ -1,8 +1,10 @@
 # Contributing to litebucket
 
-Bug reports, compatibility reports and pull requests are welcome. Report
-security issues privately (see [SECURITY.md](SECURITY.md)), not in public
-issues.
+Bug reports, compatibility reports and pull requests are welcome. Ask
+questions in [Discussions](https://github.com/tirtauntario/litebucket/discussions).
+Report security issues privately (see [SECURITY.md](SECURITY.md)), not in
+public issues. Everyone taking part follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Before you start
 
@@ -37,7 +39,7 @@ docker run --rm -v "$PWD":/src -w /src rust:1.97.1-slim-trixie \
 ```
 
 Real-client interoperability (AWS CLI, Boto3, Ruby SDK, Rails, Chrome) uses
-`scripts/interop.sh`. It expects a Python venv at `.interop/venv` (git-ignored)
+`scripts/interop.sh` (set `INTEROP_TLS=1` to run it over HTTPS). It expects a Python venv at `.interop/venv` (git-ignored)
 with `boto3` and the AWS CLI v2, Ruby with `aws-sdk-s3` and Rails, and Google
 Chrome for the browser suite. Run it with only the suites you have (for example
 `scripts/interop.sh boto3 awscli`) when you change protocol handling.
