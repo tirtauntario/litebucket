@@ -184,7 +184,7 @@ impl Capacity {
     pub fn release_part_bytes(&self, n: u64) {
         let _ = self
             .part_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |v| {
                 Some(v.saturating_sub(n))
             });
     }
