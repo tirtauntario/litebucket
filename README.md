@@ -34,6 +34,20 @@ Chrome (see [docs/compatibility.md](docs/compatibility.md)). It is **not** a
 full Amazon S3 replacement: unsupported features are rejected explicitly, never
 silently ignored. There is no replication or high availability.
 
+## Why litebucket
+
+I wanted S3 storage that is simple to run on one server, and that I can swap
+for AWS S3 or any other S3-compatible service once an app needs it in
+production. The app speaks plain S3 either way, so moving means changing the
+endpoint and keys, not the code.
+
+MinIO, the usual answer, has been moving away from open source. Most other
+options are built for clusters: many nodes, replication, erasure coding. That
+is more than I need when everything runs on one host.
+
+litebucket is the drop-in for that case: one binary, one data directory, no
+other services to run.
+
 ## Install
 
 | Method | Command |
