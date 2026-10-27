@@ -29,7 +29,9 @@ new release with no changes.
    repository by its `org.opencontainers.image.source` label.
 4. **Enable private vulnerability reporting** (Settings → Security →
    Private vulnerability reporting). `SECURITY.md` points reporters there.
-5. Optional: protect `main` and require the `CI` checks to pass.
+5. **Enable Discussions** (Settings → General → Features). The issue
+   templates and the README send questions there.
+6. Optional: protect `main` and require the `CI` checks to pass.
 
 ## Cutting a release
 
@@ -37,12 +39,29 @@ new release with no changes.
 # 1. bump the version
 $EDITOR Cargo.toml                 # version = "0.2.0"
 cargo check --locked || cargo check   # refreshes Cargo.lock for the new version
-# 2. move the "Unreleased" notes in CHANGELOG.md under "## [0.2.0] - YYYY-MM-DD"
+# 2. update CHANGELOG.md (see below)
 # 3. commit, tag, push
 git commit -am "Release v0.2.0"
 git tag -a v0.2.0 -m "litebucket v0.2.0"
 git push origin main v0.2.0
 ```
+
+Changelog for a release: rename the `## [Unreleased]` heading to
+`## [0.2.0] - YYYY-MM-DD` (the tag date), add a new empty `## [Unreleased]`
+above it, and update the links at the bottom of the file:
+
+```markdown
+[Unreleased]: https://github.com/tirtauntario/litebucket/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tirtauntario/litebucket/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/tirtauntario/litebucket/releases/tag/v0.1.0
+```
+
+**First release (v0.1.0).** `Cargo.toml` is already at `0.1.0`, so skip step
+1. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [0.1.0] - YYYY-MM-DD`,
+drop the "First public release (0.1.0)." line, add an empty
+`## [Unreleased]` above it, and replace the link at the bottom with the
+`[Unreleased]` and `[0.1.0]` lines above, using `compare/v0.1.0...HEAD`. Then
+commit, tag `v0.1.0` and push as in step 3.
 
 Watch the run under Actions → Release. Then check the result:
 
